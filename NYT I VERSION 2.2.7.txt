@@ -1,0 +1,8 @@
+Frank Advisory Intelligence Monitor v2.2.7
+
+Stabiliseringsversion:
+- Retter Åbn-knap på virksomhedsoversigten.
+- Retter DeltaGenerator-fejl i oversigter.
+- Observationer fjernet fra hovedmenuen.
+- Dashboard og briefingtekst justeret.
+- Fokus er stabilitet frem for nye funktioner.

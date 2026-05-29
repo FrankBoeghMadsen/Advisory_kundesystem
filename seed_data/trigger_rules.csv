@@ -1,0 +1,6 @@
+name,pattern,default_score,weight
+Myndighedsreaktion,lægemiddelstyrelsen|lmst|påbud|forbud|suspender|tilbagekald|recall|warning letter|inspection|inspektion|GMP|GDP|non-compliance|shortage,Kritisk,100
+Inspektion/GMP/GDP,GMP|GDP|inspection|inspektion|deficiency|deviation|non-compliance|QP|RP,Høj,80
+Lederskifte,CEO|COO|CFO|Chief|Head of QA|Head of RA|Quality Director|Regulatory Director|QP|RP|appoint|appointed|joins|fratræder|tiltræder,Middel,55
+Produktnyhed,launch|approval|approved|authorisation|produkt|markedsføringstilladelse|pipeline|clinical trial|fase,Middel,45
+Strategisk jobopslag,job|career|vacancy|stilling|QA|RA|Regulatory Affairs|Quality Assurance|compliance|QP|RP,Lav,30

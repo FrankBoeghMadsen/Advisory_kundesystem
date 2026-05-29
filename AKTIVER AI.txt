@@ -1,0 +1,13 @@
+AKTIVER AI I VERSION 2.4
+
+1. Opret OpenAI API-nøgle
+2. Åbn CMD eller PowerShell
+3. Kør:
+
+setx OPENAI_API_KEY "DIN_API_NØGLE"
+
+4. Luk terminalen
+5. Start programmet igen
+
+AI-briefing vil derefter bruge OpenAI Responses API.
+Hvis API fejler, vises en tydelig fejlmeddelelse i briefingvinduet.

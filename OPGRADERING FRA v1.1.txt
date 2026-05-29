@@ -1,0 +1,14 @@
+OPGRADERING FRA v1.1
+
+Hvis du har indtastet data i v1.1:
+
+1. Luk den gamle app.
+2. Pak v1.2 ud.
+3. Kopier mappen "data" fra v1.1 ind i v1.2-mappen.
+4. Dobbeltklik paa "Start Monitor - PC.bat" eller "Start Monitor - iPad.bat".
+
+Foerste gang v1.2 starter, kopierer den automatisk databasen til:
+
+%USERPROFILE%\FrankAdvisoryMonitorData\monitor.db
+
+Fremover ligger data adskilt fra programmet.

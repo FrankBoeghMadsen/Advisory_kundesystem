@@ -1,0 +1,25 @@
+Frank Advisory Intelligence Monitor v2.0
+
+Denne version introducerer første reelle intelligence-lag:
+
+1. Virksomhedsprofiler
+   Virksomheden er nu centrum for signaler, historik, kontakter, noter og memory.
+
+2. Historik / Sager
+   Du kan registrere historiske forløb som fx Scanpharm GMP-suspendering 2019-2020.
+
+3. Kilder på sager
+   Flere links kan knyttes til samme sag, så samme hændelse ikke bliver forstået som flere uafhængige hændelser.
+
+4. Signal-preview
+   Signaler vises nu med uddrag/resume, ikke kun titel.
+
+5. Intelligence memory
+   Du kan gemme observationer, kulturvurderinger, relationer og regulatorisk modenhed pr. virksomhed.
+
+6. Kildeadministration
+   Kilder kan redigeres, pauses, arkiveres eller slettes.
+
+7. Data og backup
+   Den eksterne datamappe fra v1.2 bevares:
+   %USERPROFILE%\FrankAdvisoryMonitorData

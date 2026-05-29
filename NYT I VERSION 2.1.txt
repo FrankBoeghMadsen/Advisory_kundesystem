@@ -1,0 +1,9 @@
+Frank Advisory Intelligence Monitor v2.1
+
+Anbefalet workflow:
+1. Kør overvågning.
+2. Gå til Signalindbakke.
+3. Læs kildeuddrag og åbn original kilde ved behov.
+4. Markér signalet som Til vurdering, Gemt på virksomhed, Irrelevant eller Arkiveret.
+5. Tilføj note ved behov.
+6. Hvis signalet viser et egentligt forløb, opret sag under virksomhedsprofilen.

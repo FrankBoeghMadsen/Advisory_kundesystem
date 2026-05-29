@@ -1,0 +1,5 @@
+name,source_type,url,keywords,active
+LMST - nyheder,rss,https://laegemiddelstyrelsen.dk/da/nyheder/nyheder/rss,"myndighed,LMST,lægemiddelstyrelsen,recall,tilbagekaldelse,inspektion,påbud,advarsel",1
+EMA - news,rss,https://www.ema.europa.eu/en/news-events/whats-new/rss.xml,"EMA,CHMP,safety,shortage,variation,authorisation",1
+FDA Warning Letters,rss,https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/inspections-compliance-enforcement-and-criminal-investigations,"warning letter,GMP,inspection,compliance",1
+Google News DK life science,rss,https://news.google.com/rss/search?q=denmark%20pharma%20GMP%20OR%20recall%20OR%20L%C3%A6gemiddelstyrelsen&hl=da&gl=DK&ceid=DK:da,"lægemiddelstyrelsen,pharma,GMP,recall,tilbagekaldelse,myndighed",1

@@ -1,0 +1,852 @@
+
+import streamlit as st
+from datetime import datetime, date
+from pathlib import Path
+from db import init_db, fetch_df, execute, connect, DATA_DIR, UPLOAD_DIR
+from monitor import run_monitor
+
+import os
+
+def ai_briefing_text(company_name, context_text):
+    """AI briefing via OpenAI Responses API with local fallback."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+
+            prompt = f"""
+Du er senior strategisk rådgiver for Frank Bøgh Madsen Advisory.
+
+Lav en konkret, kortfattet og professionel mødeforberedelse på dansk til et kommende møde med virksomheden: {company_name}.
+
+Brug kun oplysninger fra konteksten nedenfor.
+Du må gerne:
+- sammenholde oplysninger
+- identificere mønstre
+- foreslå relevante spørgsmål
+- pege på forhold der bør verificeres
+- pege på mulige regulatoriske eller strategiske risici/muligheder
+
+Du må IKKE opfinde fakta.
+
+Struktur:
+# Situationsbillede
+# Centrale opfølgningspunkter
+# Observationer der bør verificeres
+# Mulige spørgsmål til mødet
+# Potentielle rådgivningsmuligheder
+# Frister og næste skridt
+
+Kontekst:
+{context_text[:18000]}
+"""
+
+            response = client.responses.create(
+                model=model,
+                input=prompt,
+                temperature=0.2
+            )
+
+            text = ""
+            if hasattr(response, "output_text"):
+                text = response.output_text
+
+            if not text:
+                try:
+                    text = response.output[0].content[0].text
+                except Exception:
+                    text = ""
+
+            if text and text.strip():
+                return text
+
+            return "AI-modellen returnerede ikke noget indhold."
+
+        except Exception as e:
+            return f"""# AI-fejl
+
+Der opstod en fejl ved AI-briefing.
+
+Fejl:
+{str(e)}
+
+Kontroller:
+- at OPENAI_API_KEY er sat korrekt
+- at internet virker
+- at OpenAI-kontoen har API-adgang
+- at modellen findes
+
+Lokal fallback:
+
+{local_briefing_text(company_name, context_text)}
+"""
+
+    return f"""# AI ikke aktiveret
+
+OPENAI_API_KEY er ikke sat på computeren.
+
+Systemet bruger derfor lokal briefing-skabelon.
+
+For at aktivere AI:
+1. Opret OpenAI API-nøgle
+2. Kør i PowerShell eller CMD:
+
+setx OPENAI_API_KEY "din_nøgle"
+
+3. Genstart programmet
+
+{local_briefing_text(company_name, context_text)}
+"""
+
+def local_briefing_text(company_name, context_text):
+    return f"""# Mødebriefing: {company_name}
+
+## Situationsbillede
+- Gennemgå seneste møder, observationer, signaler og historiske sager.
+- Fokusér især på oplysninger markeret som ikke verificeret eller bør verificeres.
+
+## Centrale opfølgningspunkter
+- Hvad blev aftalt sidst?
+- Er der åbne opfølgningspunkter eller frister?
+- Er der personer eller relationer, der bør aktiveres?
+
+## Mulige spørgsmål til mødet
+- Hvilke kvalitetsmæssige eller regulatoriske forhold fylder mest lige nu?
+- Hvad er ændret siden sidst i organisation, QA/RA/GMP eller ledelse?
+- Er der konkrete projekter eller frister hvor ekstern sparring kan skabe værdi?
+
+## Potentielle rådgivningsmuligheder
+- Strategisk sparring om myndighedsdialog
+- Gennemgang af regulatoriske problemstillinger
+- Forberedelse til inspektioner eller opfølgning
+- Overblik over risici og næste skridt
+"""
+
+try:
+    from document_utils import extract_text_from_file, simple_meeting_summary
+except Exception:
+    extract_text_from_file = None
+    simple_meeting_summary = None
+
+st.set_page_config(page_title="Frank Advisory Intelligence Monitor v2.4", layout="wide")
+init_db()
+
+def q(sql, params=()):
+    return fetch_df(sql, params)
+
+def run(sql, params=()):
+    execute(sql, params)
+
+def display_date(value):
+    if not value:
+        return ""
+    s = str(value)
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", ""))
+        return dt.strftime("%d-%m-%Y")
+    except Exception:
+        pass
+    if len(s) >= 10 and s[4:5] == "-" and s[7:8] == "-":
+        return f"{s[8:10]}-{s[5:7]}-{s[0:4]}"
+    return s
+
+def now_iso():
+    return datetime.utcnow().isoformat()
+
+def short(text, n=900):
+    text = text or ""
+    return text if len(text) <= n else text[:n] + "..."
+
+def severity_index(value, options):
+    return options.index(value) if value in options else 0
+
+def count_for(table, company_id):
+    try:
+        return int(q(f"SELECT COUNT(*) AS n FROM {table} WHERE company_id=?", (company_id,))["n"].iloc[0])
+    except Exception:
+        return 0
+
+def set_page(name):
+    st.session_state["page"] = name
+
+def set_company(company_id):
+    st.session_state["selected_company_id"] = int(company_id)
+    st.session_state["force_profile_view"] = True
+
+
+def briefing_context(company_id):
+    parts = []
+    company = q("SELECT * FROM companies WHERE id=?", (company_id,))
+    if len(company):
+        r = company.iloc[0]
+        parts.append(f"Virksomhed: {r['name']}")
+        parts.append(f"Kategori: {r.get('category','') if hasattr(r,'get') else r['category']}")
+    for label, sql in [
+        ("Seneste møder", "SELECT meeting_date, meeting_time, location, title, participants, summary, key_takeaways, next_steps FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC, created_at DESC LIMIT 10"),
+        ("Observationer", "SELECT observation_date, title, observation_type, source_type, confidence, verification_status, content, implication, follow_up FROM observations WHERE company_id=? ORDER BY observation_date DESC, created_at DESC LIMIT 15"),
+        ("Historik / sager", "SELECT title, case_type, period_start, period_end, severity, relevance, status, summary, significance, current_relevance FROM company_cases WHERE company_id=? ORDER BY period_start DESC, created_at DESC LIMIT 10"),
+        ("Signaler", "SELECT collected_at, title, trigger_type, score, review_status, ai_summary, review_note FROM signals WHERE company_id=? ORDER BY collected_at DESC LIMIT 15"),
+        ("Videnbank", "SELECT memory_type, title, content, confidence, created_at FROM intelligence_memory WHERE company_id=? ORDER BY created_at DESC LIMIT 15"),
+        ("Noter", "SELECT title, note, created_at FROM notes WHERE company_id=? ORDER BY created_at DESC LIMIT 15")
+    ]:
+        df = q(sql, (company_id,))
+        if len(df):
+            parts.append(f"\n## {label}")
+            for _, row in df.iterrows():
+                vals = []
+                for col in df.columns:
+                    val = row[col]
+                    if val:
+                        vals.append(f"{col}: {val}")
+                parts.append("- " + " | ".join(vals))
+    return "\n".join(parts)
+
+
+def save_uploaded_file(company_id, uploaded_file):
+    safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
+    folder = UPLOAD_DIR / str(company_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
+    with open(target, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return target
+
+st.markdown("""
+<style>
+div.stButton > button { min-height: 2.35rem; font-size: 0.95rem; }
+[data-testid="stDataFrame"] { font-size: 0.88rem; }
+.small-muted { color: #777; font-size: 0.85rem; }
+.company-row { border-bottom: 1px solid #eee; padding: 0.15rem 0; }
+</style>
+""", unsafe_allow_html=True)
+
+page_options = ["Dashboard", "Signalindbakke", "Virksomheder", "Briefing", "Kilder", "Triggerregler"]
+if "page" not in st.session_state:
+    st.session_state["page"] = "Dashboard"
+if st.session_state["page"] not in page_options:
+    st.session_state["page"] = "Dashboard"
+
+st.title("Frank Advisory Intelligence Monitor v2.4")
+st.caption("Advisory intelligence, virksomhedsprofiler og mødeforberedelse")
+
+with st.sidebar:
+    st.caption(f"Data: {DATA_DIR}")
+    chosen = st.radio("Vælg visning", page_options, index=page_options.index(st.session_state["page"]))
+    if chosen != st.session_state["page"]:
+        st.session_state["page"] = chosen
+        st.rerun()
+    if st.button("Kør overvågning nu", type="primary"):
+        with st.spinner("Overvåger kilder..."):
+            result = run_monitor()
+        st.success(f"Færdig. Fund indsamlet: {result['collected']}. Relevante signaler: {result['relevant']}.")
+
+page = st.session_state["page"]
+
+if page == "Dashboard":
+    signals = q("""SELECT s.id, s.collected_at, c.name AS company, s.trigger_type, s.score,
+                          s.title, COALESCE(s.review_status,'Ny') AS review_status
+                   FROM signals s LEFT JOIN companies c ON c.id=s.company_id
+                   ORDER BY s.collected_at DESC""")
+    companies = q("SELECT * FROM companies")
+    meetings = q("SELECT m.*, c.name AS company FROM meetings m LEFT JOIN companies c ON c.id=m.company_id ORDER BY m.meeting_date ASC, m.meeting_time ASC")
+    observations = q("SELECT * FROM observations")
+    cols = st.columns(5)
+    cols[0].metric("Nye signaler", int((signals["review_status"] == "Ny").sum()) if len(signals) else 0)
+    cols[1].metric("Til vurdering", int((signals["review_status"] == "Til vurdering").sum()) if len(signals) else 0)
+    cols[2].metric("Virksomheder", len(companies))
+    cols[3].metric("Møder", len(meetings))
+    cols[4].metric("Observationer", len(observations))
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader(f"Dashboard · {display_date(date.today().isoformat())}")
+        st.markdown("### Signalpåmindelse")
+        new_count = int((signals["review_status"] == "Ny").sum()) if len(signals) else 0
+        review_count = int((signals["review_status"] == "Til vurdering").sum()) if len(signals) else 0
+        if new_count or review_count:
+            st.info(f"Der er {new_count} nye signaler og {review_count} signaler til vurdering.")
+        else:
+            st.success("Ingen nye signaler kræver behandling.")
+        if st.button("Gå til Signalindbakke"):
+            set_page("Signalindbakke")
+            st.rerun()
+    with c2:
+        st.subheader("Kommende møder / husketing")
+        today = date.today().isoformat()
+        upcoming = q("""SELECT m.meeting_date, m.meeting_time, m.location, m.title, c.name AS company
+                        FROM meetings m LEFT JOIN companies c ON c.id=m.company_id
+                        WHERE m.meeting_date >= ?
+                        ORDER BY m.meeting_date ASC, m.meeting_time ASC
+                        LIMIT 8""", (today,))
+        if len(upcoming):
+            for _, m in upcoming.iterrows():
+                when = display_date(m["meeting_date"])
+                if m["meeting_time"]:
+                    when += f" kl. {m['meeting_time']}"
+                st.markdown(f"**{when} — {m['company']}**")
+                st.caption(f"{m['title'] or 'Møde'}" + (f" · {m['location']}" if m["location"] else ""))
+            if st.button("Gå til Briefing"):
+                set_page("Briefing")
+                st.rerun()
+        else:
+            st.caption("Ingen kommende møder registreret.")
+
+    st.subheader("Mødeforberedelse")
+    st.caption("Brug kommende møder som anledning til at samle tidligere aftaler, observationer og åbne opfølgningspunkter.")
+
+elif page == "Signalindbakke":
+    st.subheader("Signalindbakke")
+    df = q("""SELECT s.id, s.collected_at, c.name AS company, s.trigger_type, s.score,
+                     s.title, s.raw_summary, s.source_excerpt, s.matched_terms, s.ai_summary,
+                     s.suggested_reaction, COALESCE(s.review_status,'Ny') AS review_status,
+                     s.review_note, s.url
+              FROM signals s LEFT JOIN companies c ON c.id=s.company_id
+              ORDER BY s.collected_at DESC""")
+    f1, f2, f3 = st.columns(3)
+    status_filter = f1.multiselect("Status", ["Ny","Til vurdering","Gemt på virksomhed","Irrelevant","Arkiveret"], default=["Ny","Til vurdering"])
+    score_filter = f2.multiselect("Score", ["Lav","Middel","Høj","Kritisk"], default=["Lav","Middel","Høj","Kritisk"])
+    search = f3.text_input("Søg")
+    if len(df):
+        df = df[df["review_status"].isin(status_filter)]
+        df = df[df["score"].isin(score_filter)]
+        if search:
+            df = df[df["company"].fillna("").str.contains(search, case=False, na=False) | df["title"].fillna("").str.contains(search, case=False, na=False)]
+    if len(df):
+        for _, r in df.iterrows():
+            with st.container(border=True):
+                st.markdown(f"### {r['company'] or 'Ukendt'}")
+                st.markdown(f"**{r['title']}**")
+                st.caption(f"Dato: {display_date(r['collected_at'])} · Trigger: {r['trigger_type']} · Score: {r['score']} · Status: {r['review_status']}")
+                if r["matched_terms"]:
+                    st.write(f"**Match:** {r['matched_terms']}")
+                preview = r["source_excerpt"] or r["ai_summary"] or r["raw_summary"] or ""
+                if preview:
+                    st.write(short(preview, 1400))
+                if r["suggested_reaction"]:
+                    st.write(f"**Foreløbig vurdering:** {r['suggested_reaction']}")
+                if r["review_note"]:
+                    st.info(f"Note: {r['review_note']}")
+                btns = st.columns([1,1,1,1,1,2])
+                if btns[0].button("Til vurdering", key=f"sig_review_{r['id']}"):
+                    run("UPDATE signals SET review_status=? WHERE id=?", ("Til vurdering", int(r["id"]))); st.rerun()
+                if btns[1].button("Gem", key=f"sig_save_{r['id']}"):
+                    run("UPDATE signals SET review_status=? WHERE id=?", ("Gemt på virksomhed", int(r["id"]))); st.rerun()
+                if btns[2].button("Irrelevant", key=f"sig_irr_{r['id']}"):
+                    run("UPDATE signals SET review_status=? WHERE id=?", ("Irrelevant", int(r["id"]))); st.rerun()
+                if btns[3].button("Arkivér", key=f"sig_arch_{r['id']}"):
+                    run("UPDATE signals SET review_status=? WHERE id=?", ("Arkiveret", int(r["id"]))); st.rerun()
+                if btns[4].button("Slet", key=f"sig_del_{r['id']}"):
+                    run("DELETE FROM signals WHERE id=?", (int(r["id"]),)); st.rerun()
+                if r["url"]:
+                    btns[5].link_button("Åbn kilde", r["url"])
+                with st.expander("Ret behandlingsnote"):
+                    note = st.text_area("Note", value=r["review_note"] or "", key=f"sig_note_{r['id']}")
+                    if st.button("Gem note", key=f"sig_note_save_{r['id']}"):
+                        run("UPDATE signals SET review_note=? WHERE id=?", (note, int(r["id"]))); st.rerun()
+    else:
+        st.info("Ingen signaler matcher filteret.")
+
+elif page == "Virksomheder":
+    st.subheader("Virksomheder")
+    companies = q("SELECT * FROM companies ORDER BY name")
+    default_mode_index = 1 if st.session_state.pop("force_profile_view", False) else 0
+    mode = st.radio("Visning", ["Oversigt", "Profil"], horizontal=True, index=default_mode_index)
+
+    if mode == "Oversigt":
+        f1, f2, f3 = st.columns([1,1,2])
+        status_filter = f1.multiselect("Status", ["Aktiv","Pauset","Arkiveret"], default=["Aktiv","Pauset"])
+        priority_filter = f2.multiselect("Prioritet", ["Lav","Middel","Høj"], default=["Lav","Middel","Høj"])
+        search = f3.text_input("Søg i virksomheder")
+        shown = companies.copy()
+        if len(shown):
+            shown = shown[shown["status"].isin(status_filter)]
+            shown = shown[shown["priority"].isin(priority_filter)]
+            if search:
+                shown = shown[shown["name"].fillna("").str.contains(search, case=False, na=False) |
+                              shown["category"].fillna("").str.contains(search, case=False, na=False) |
+                              shown["aliases"].fillna("").str.contains(search, case=False, na=False)]
+        if len(shown):
+            for _, r in shown.iterrows():
+                cols = st.columns([0.8,3,2,1,1])
+                if cols[0].button("Åbn", key=f"open_company_{int(r['id'])}"):
+                    set_company(int(r["id"]))
+                    st.rerun()
+                cols[1].markdown(f"**{r['name']}**")
+                cols[2].caption(r["category"] or "")
+                cols[3].caption(r["priority"] or "")
+                cols[4].caption(r["status"] or "")
+        else:
+            st.info("Ingen virksomheder matcher filteret.")
+
+    else:
+        if len(companies) == 0:
+            st.info("Ingen virksomheder.")
+        else:
+            ids = companies["id"].tolist()
+            default_id = st.session_state.get("selected_company_id", ids[0])
+            idx = ids.index(default_id) if default_id in ids else 0
+            selected_name = st.selectbox("Vælg virksomhed", companies["name"].tolist(), index=idx)
+            company_id = int(companies[companies["name"] == selected_name]["id"].iloc[0])
+            st.session_state["selected_company_id"] = company_id
+            row = q("SELECT * FROM companies WHERE id=?", (company_id,)).iloc[0]
+
+            st.markdown(f"## {row['name']}")
+            meta = st.columns(3)
+            meta[0].metric("Kategori", row["category"] or "—")
+            meta[1].metric("Prioritet", row["priority"] or "—")
+            meta[2].metric("Status", row["status"] or "—")
+            links = []
+            if row["website"]: links.append(f"[Website]({row['website']})")
+            if row["linkedin"]: links.append(f"[LinkedIn]({row['linkedin']})")
+            if links: st.markdown(" · ".join(links))
+
+            sig_n = count_for("signals", company_id)
+            meet_n = count_for("meetings", company_id)
+            obs_n = count_for("observations", company_id)
+            case_n = count_for("company_cases", company_id)
+            contact_n = count_for("contacts", company_id)
+            note_n = count_for("notes", company_id)
+            mem_n = count_for("intelligence_memory", company_id)
+
+            sections = [f"Signaler ({sig_n})", f"Møder ({meet_n})", f"Observationer ({obs_n})", f"Historik / Sager ({case_n})", f"Kontakter ({contact_n})", f"Noter ({note_n})", f"Videnbank ({mem_n})", "Briefing"]
+            section = st.radio("Profilsektion", sections, horizontal=True, key="profile_section")
+            section_base = section.split(" (")[0]
+
+            with st.expander("Redigér virksomhedsdata"):
+                with st.form("edit_company_form"):
+                    name = st.text_input("Navn", row["name"])
+                    category = st.text_area("Kategori", row["category"] or "", height=80)
+                    country = st.text_input("Land", row["country"] or "Danmark")
+                    priority = st.selectbox("Prioritet", ["Lav","Middel","Høj"], index=severity_index(row["priority"], ["Lav","Middel","Høj"]))
+                    status = st.selectbox("Status", ["Aktiv","Pauset","Arkiveret"], index=severity_index(row["status"], ["Aktiv","Pauset","Arkiveret"]))
+                    aliases = st.text_input("Aliaser", row["aliases"] or "")
+                    website = st.text_input("Website", row["website"] or "")
+                    linkedin = st.text_input("LinkedIn", row["linkedin"] or "")
+                    if st.form_submit_button("Gem virksomhed"):
+                        run("UPDATE companies SET name=?, category=?, country=?, priority=?, status=?, aliases=?, website=?, linkedin=? WHERE id=?",
+                            (name, category, country, priority, status, aliases, website, linkedin, company_id)); st.rerun()
+
+            if section_base == "Signaler":
+                sigs = q("SELECT id, collected_at, trigger_type, score, review_status, title FROM signals WHERE company_id=? ORDER BY collected_at DESC", (company_id,))
+                if len(sigs):
+                    for _, s in sigs.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**{s['title']}**")
+                            st.caption(f"Dato: {display_date(s['collected_at'])} · {s['trigger_type']} · {s['score']} · {s['review_status']}")
+                            c = st.columns([1,1])
+                            if c[0].button("Arkivér", key=f"prof_sig_arch_{int(s['id'])}"):
+                                run("UPDATE signals SET review_status='Arkiveret' WHERE id=?", (int(s["id"]),)); st.rerun()
+                            if c[1].button("Slet", key=f"prof_sig_del_{int(s['id'])}"):
+                                run("DELETE FROM signals WHERE id=?", (int(s["id"]),)); st.rerun()
+                else:
+                    st.info("Ingen signaler.")
+
+            elif section_base == "Møder":
+                meetings = q("SELECT * FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC, created_at DESC", (company_id,))
+                if len(meetings):
+                    for _, m in meetings.iterrows():
+                        with st.container(border=True):
+                            when = display_date(m["meeting_date"])
+                            if "meeting_time" in meetings.columns and m["meeting_time"]:
+                                when += f" kl. {m['meeting_time']}"
+                            st.markdown(f"**{when} — {m['title']}**")
+                            extra = []
+                            if "location" in meetings.columns and m["location"]: extra.append(m["location"])
+                            if m["meeting_type"]: extra.append(m["meeting_type"])
+                            if m["relation_strength"]: extra.append(f"Relation: {m['relation_strength']}")
+                            st.caption(" · ".join(extra))
+                            if m["participants"]: st.write(f"**Deltagere:** {m['participants']}")
+                            if m["summary"]: st.write(m["summary"])
+                            if m["key_takeaways"]: st.write(f"**Hvad lærte vi:** {m['key_takeaways']}")
+                            if m["next_steps"]: st.write(f"**Næste skridt / frister:** {m['next_steps']}")
+                            with st.expander("Redigér / slet møde"):
+                                with st.form(f"edit_meeting_{int(m['id'])}"):
+                                    title = st.text_input("Titel", m["title"])
+                                    meeting_date = st.text_input("Dato", m["meeting_date"] or "")
+                                    meeting_time = st.text_input("Tidspunkt", m["meeting_time"] if "meeting_time" in meetings.columns else "")
+                                    location = st.text_input("Adresse/sted", m["location"] if "location" in meetings.columns else "")
+                                    participants = st.text_input("Deltagere", m["participants"] or "")
+                                    summary = st.text_area("Resume", m["summary"] or "")
+                                    key_takeaways = st.text_area("Hvad lærte vi?", m["key_takeaways"] or "")
+                                    next_steps = st.text_area("Næste skridt / frister", m["next_steps"] or "")
+                                    a,b = st.columns(2)
+                                    if a.form_submit_button("Gem ændringer"):
+                                        run("UPDATE meetings SET title=?, meeting_date=?, meeting_time=?, location=?, participants=?, summary=?, key_takeaways=?, next_steps=?, updated_at=? WHERE id=?",
+                                            (title, meeting_date, meeting_time, location, participants, summary, key_takeaways, next_steps, now_iso(), int(m["id"]))); st.rerun()
+                                    if b.form_submit_button("Slet møde"):
+                                        run("DELETE FROM meetings WHERE id=?", (int(m["id"]),)); st.rerun()
+                with st.expander("Tilføj møde", expanded=False):
+                    form_key = f"add_meeting_{company_id}_{st.session_state.get('meeting_form_version',0)}"
+                    with st.form(form_key, clear_on_submit=True):
+                        title = st.text_input("Titel", value="")
+                        meeting_date = st.text_input("Dato", datetime.now().strftime("%Y-%m-%d"))
+                        meeting_time = st.text_input("Tidspunkt", value="")
+                        location = st.text_input("Adresse/sted", value="")
+                        meeting_type = st.selectbox("Type", ["Kaffemøde","Kundemøde","Netværk","Konference","Telefon","Regulatorisk","Uformelt"])
+                        participants = st.text_input("Deltagere", value="")
+                        relation_strength = st.selectbox("Relationstyrke", ["Svag","Middel","Stærk","Meget stærk"], index=1)
+                        confidentiality = st.selectbox("Fortrolighed", ["Offentlig/OSINT","Intern","Fortrolig","Del ikke eksternt"], index=1)
+                        summary = st.text_area("Resume", value="")
+                        key_takeaways = st.text_area("Hvad lærte vi?", value="")
+                        next_steps = st.text_area("Næste skridt / frister", value="")
+                        if st.form_submit_button("Gem møde"):
+                            run("""INSERT INTO meetings (company_id, meeting_date, meeting_time, location, title, meeting_type, participants, relation_strength, confidentiality, summary, key_takeaways, next_steps, created_at, updated_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (company_id, meeting_date, meeting_time, location, title, meeting_type, participants, relation_strength, confidentiality, summary, key_takeaways, next_steps, now_iso(), now_iso()))
+                            st.session_state["meeting_form_version"] = st.session_state.get("meeting_form_version",0) + 1
+                            st.rerun()
+                with st.expander("Upload referat", expanded=False):
+                    upload_key = f"upload_{company_id}_{st.session_state.get('upload_version',0)}"
+                    uploaded = st.file_uploader("Upload Word, PDF eller TXT", type=["docx","pdf","txt"], key=upload_key)
+                    if uploaded and extract_text_from_file:
+                        meeting_title = st.text_input("Mødetitel", Path(uploaded.name).stem, key=f"upload_title_{upload_key}")
+                        meeting_date = st.text_input("Dato for møde", datetime.now().strftime("%Y-%m-%d"), key=f"upload_date_{upload_key}")
+                        meeting_time = st.text_input("Tidspunkt", value="", key=f"upload_time_{upload_key}")
+                        location = st.text_input("Adresse/sted", value="", key=f"upload_location_{upload_key}")
+                        if st.button("Gem og udtræk tekst", key=f"upload_btn_{upload_key}"):
+                            path = save_uploaded_file(company_id, uploaded)
+                            extracted = extract_text_from_file(str(path))
+                            summary = simple_meeting_summary(extracted) if simple_meeting_summary else {"summary": extracted[:1000], "key_takeaways": "", "next_steps": ""}
+                            run("""INSERT INTO meetings (company_id, meeting_date, meeting_time, location, title, meeting_type, confidentiality, shareability, summary, key_takeaways, next_steps, raw_text, uploaded_filename, created_at, updated_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (company_id, meeting_date, meeting_time, location, meeting_title, "Referat", "Intern", "Kun internt", summary["summary"], summary["key_takeaways"], summary["next_steps"], extracted, uploaded.name, now_iso(), now_iso()))
+                            st.session_state["upload_version"] = st.session_state.get("upload_version",0) + 1
+                            st.rerun()
+
+            elif section_base == "Observationer":
+                observations = q("SELECT * FROM observations WHERE company_id=? ORDER BY observation_date DESC, created_at DESC", (company_id,))
+                if len(observations):
+                    for _, o in observations.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**{o['title']}**")
+                            st.caption(f"{display_date(o['observation_date'])} · {o['observation_type']} · {o['source_type']} · {o['confidence']} · {o['verification_status']}")
+                            st.write(o["content"])
+                            if o["implication"]: st.write(f"**Mulig betydning:** {o['implication']}")
+                            if o["follow_up"]: st.write(f"**Opfølgning:** {o['follow_up']}")
+                            with st.expander("Redigér / slet observation"):
+                                with st.form(f"edit_obs_{int(o['id'])}"):
+                                    title = st.text_input("Titel", o["title"])
+                                    content = st.text_area("Indhold", o["content"])
+                                    implication = st.text_area("Mulig betydning", o["implication"] or "")
+                                    follow_up = st.text_area("Opfølgning", o["follow_up"] or "")
+                                    a,b = st.columns(2)
+                                    if a.form_submit_button("Gem ændringer"):
+                                        run("UPDATE observations SET title=?, content=?, implication=?, follow_up=?, updated_at=? WHERE id=?",
+                                            (title, content, implication, follow_up, now_iso(), int(o["id"]))); st.rerun()
+                                    if b.form_submit_button("Slet observation"):
+                                        run("DELETE FROM observations WHERE id=?", (int(o["id"]),)); st.rerun()
+                with st.expander("Tilføj observation / rygte / signal"):
+                    with st.form(f"add_observation_{company_id}_{st.session_state.get('obs_form_version',0)}", clear_on_submit=True):
+                        title = st.text_input("Titel", value="")
+                        observation_date = st.text_input("Dato", datetime.now().strftime("%Y-%m-%d"))
+                        observation_type = st.selectbox("Type", ["Observation","Rygte","Mødesignal","OSINT-signal","Relation","Risiko","Mulighed"])
+                        source_type = st.selectbox("Kilde", ["OSINT","Kaffemøde","Konkurrent","Relation","Tidligere erfaring","Andet"])
+                        confidence = st.selectbox("Tillid", ["Lav","Middel","Høj"], index=1)
+                        verification_status = st.selectbox("Verifikation", ["Ikke verificeret","Bør verificeres","Delvist verificeret","Verificeret"], index=0)
+                        content = st.text_area("Indhold", value="")
+                        implication = st.text_area("Mulig betydning", value="")
+                        follow_up = st.text_area("Opfølgning", value="")
+                        if st.form_submit_button("Gem observation"):
+                            run("""INSERT INTO observations (company_id, observation_date, title, observation_type, source_type, confidence, verification_status, content, implication, follow_up, created_at, updated_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (company_id, observation_date, title, observation_type, source_type, confidence, verification_status, content, implication, follow_up, now_iso(), now_iso()))
+                            st.session_state["obs_form_version"] = st.session_state.get("obs_form_version",0) + 1
+                            st.rerun()
+
+            elif section_base == "Historik / Sager":
+                cases = q("SELECT * FROM company_cases WHERE company_id=? ORDER BY period_start DESC, created_at DESC", (company_id,))
+                if len(cases):
+                    for _, c in cases.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**{c['title']}**")
+                            st.caption(f"{c['case_type']} · {c['severity']} · relevans {c['relevance']} · {c['status']}")
+                            if c["summary"]: st.write(c["summary"])
+                            with st.expander("Redigér / slet sag"):
+                                with st.form(f"edit_case_{int(c['id'])}"):
+                                    title = st.text_input("Titel", c["title"])
+                                    summary = st.text_area("Resume", c["summary"] or "")
+                                    significance = st.text_area("Betydning", c["significance"] or "")
+                                    current_relevance = st.text_area("Nuværende relevans", c["current_relevance"] or "")
+                                    a,b = st.columns(2)
+                                    if a.form_submit_button("Gem ændringer"):
+                                        run("UPDATE company_cases SET title=?, summary=?, significance=?, current_relevance=?, updated_at=? WHERE id=?",
+                                            (title, summary, significance, current_relevance, now_iso(), int(c["id"]))); st.rerun()
+                                    if b.form_submit_button("Slet sag"):
+                                        run("DELETE FROM company_cases WHERE id=?", (int(c["id"]),)); st.rerun()
+                with st.expander("Tilføj sag/historik"):
+                    with st.form(f"add_case_{company_id}_{st.session_state.get('case_form_version',0)}", clear_on_submit=True):
+                        title = st.text_input("Titel", value="")
+                        case_type = st.text_input("Sagstype", value="Myndighedsreaktion / GMP")
+                        period_start = st.text_input("Periode start", value="")
+                        period_end = st.text_input("Periode slut", value="")
+                        severity = st.selectbox("Alvor", ["Lav","Middel","Høj","Kritisk"], index=2)
+                        relevance = st.selectbox("Relevans", ["Lav","Middel","Høj","Kritisk"], index=1)
+                        status = st.selectbox("Status", ["Åben","Afsluttet","Monitoreres","Arkiveret"], index=1)
+                        summary = st.text_area("Kort resume", value="")
+                        significance = st.text_area("Betydning", value="")
+                        current_relevance = st.text_area("Nuværende relevans", value="")
+                        if st.form_submit_button("Gem sag"):
+                            run("""INSERT INTO company_cases (company_id, title, case_type, period_start, period_end, severity, relevance, status, summary, significance, current_relevance, created_at, updated_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (company_id, title, case_type, period_start, period_end, severity, relevance, status, summary, significance, current_relevance, now_iso(), now_iso()))
+                            st.session_state["case_form_version"] = st.session_state.get("case_form_version",0) + 1
+                            st.rerun()
+
+            elif section_base == "Kontakter":
+                contacts = q("SELECT * FROM contacts WHERE company_id=? ORDER BY name", (company_id,))
+                if len(contacts):
+                    for _, c in contacts.iterrows():
+                        with st.container(border=True):
+                            col1, col2, col3 = st.columns([2.2, 2.2, 1.2])
+                            col1.markdown(f"**{c['name']}**")
+                            col2.caption(c["role"] or "")
+                            if c["email"]:
+                                col1.caption(c["email"])
+                            if c["linkedin"]:
+                                col2.markdown(f"[LinkedIn]({c['linkedin']})")
+                            if c["notes"]:
+                                st.caption(c["notes"])
+                            with col3.expander("Ret/slet"):
+                                with st.form(f"edit_contact_{int(c['id'])}"):
+                                    name = st.text_input("Navn", c["name"])
+                                    role = st.text_input("Rolle", c["role"] or "")
+                                    email = st.text_input("Email", c["email"] or "")
+                                    linkedin = st.text_input("LinkedIn", c["linkedin"] or "")
+                                    notes = st.text_area("Noter", c["notes"] or "", height=90)
+                                    if st.form_submit_button("Gem"):
+                                        run("UPDATE contacts SET name=?, role=?, email=?, linkedin=?, notes=? WHERE id=?",
+                                            (name, role, email, linkedin, notes, int(c["id"]))); st.rerun()
+                                    if st.form_submit_button("Slet"):
+                                        run("DELETE FROM contacts WHERE id=?", (int(c["id"]),)); st.rerun()
+                else:
+                    st.info("Ingen kontakter.")
+                with st.expander("Tilføj kontakt"):
+                    with st.form(f"add_contact_{company_id}_{st.session_state.get('contact_form_version',0)}", clear_on_submit=True):
+                        name = st.text_input("Navn", value="")
+                        role = st.text_input("Rolle", value="")
+                        email = st.text_input("Email", value="")
+                        linkedin = st.text_input("LinkedIn", value="")
+                        notes = st.text_area("Noter", value="", height=90)
+                        if st.form_submit_button("Gem kontakt"):
+                            run("INSERT INTO contacts (company_id, name, role, email, linkedin, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                (company_id, name, role, email, linkedin, notes, now_iso()))
+                            st.session_state["contact_form_version"] = st.session_state.get("contact_form_version",0) + 1
+                            st.rerun()
+
+            elif section_base == "Noter":
+                notes = q("SELECT * FROM notes WHERE company_id=? ORDER BY created_at DESC", (company_id,))
+                if len(notes):
+                    for _, n in notes.iterrows():
+                        with st.container(border=True):
+                            title = n["title"] if "title" in notes.columns and n["title"] else "Note"
+                            st.markdown(f"**{title}**")
+                            st.caption(f"Dato: {display_date(n['created_at'])}")
+                            st.write(n["note"])
+                            with st.expander("Redigér / slet note"):
+                                with st.form(f"edit_note_{int(n['id'])}"):
+                                    title2 = st.text_input("Overskrift", title if title != "Note" else "")
+                                    note2 = st.text_area("Note", n["note"], height=160)
+                                    a,b = st.columns(2)
+                                    if a.form_submit_button("Gem ændringer"):
+                                        run("UPDATE notes SET title=?, note=?, updated_at=? WHERE id=?", (title2, note2, now_iso(), int(n["id"]))); st.rerun()
+                                    if b.form_submit_button("Slet note"):
+                                        run("DELETE FROM notes WHERE id=?", (int(n["id"]),)); st.rerun()
+                with st.expander("Tilføj note"):
+                    with st.form(f"add_note_{company_id}_{st.session_state.get('note_form_version',0)}", clear_on_submit=True):
+                        title = st.text_input("Overskrift", value="")
+                        note = st.text_area("Note", value="", height=160)
+                        if st.form_submit_button("Gem note"):
+                            run("INSERT INTO notes (company_id, title, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                                (company_id, title, note, now_iso(), now_iso()))
+                            st.session_state["note_form_version"] = st.session_state.get("note_form_version",0) + 1
+                            st.rerun()
+
+            elif section_base == "Videnbank":
+                memories = q("SELECT * FROM intelligence_memory WHERE company_id=? ORDER BY created_at DESC", (company_id,))
+                if len(memories):
+                    for _, m in memories.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**{m['title'] or m['memory_type']}**")
+                            st.caption(f"Dato: {display_date(m['created_at'])} · {m['memory_type']} · sikkerhed: {m['confidence']}")
+                            st.write(m["content"])
+                            with st.expander("Redigér / slet viden"):
+                                with st.form(f"edit_mem_{int(m['id'])}"):
+                                    title = st.text_input("Titel", m["title"] or "")
+                                    content = st.text_area("Indhold", m["content"], height=180)
+                                    confidence = st.selectbox("Sikkerhed", ["Lav","Middel","Høj"], index=severity_index(m["confidence"], ["Lav","Middel","Høj"]))
+                                    a,b = st.columns(2)
+                                    if a.form_submit_button("Gem ændringer"):
+                                        run("UPDATE intelligence_memory SET title=?, content=?, confidence=?, updated_at=? WHERE id=?",
+                                            (title, content, confidence, now_iso(), int(m["id"]))); st.rerun()
+                                    if b.form_submit_button("Slet viden"):
+                                        run("DELETE FROM intelligence_memory WHERE id=?", (int(m["id"]),)); st.rerun()
+                with st.expander("Tilføj viden"):
+                    with st.form(f"add_memory_{company_id}_{st.session_state.get('mem_form_version',0)}", clear_on_submit=True):
+                        memory_type = st.selectbox("Type", ["Observation","Relation","Kultur","Regulatorisk modenhed","Historisk erfaring","Strategisk mulighed"])
+                        title = st.text_input("Titel", value="")
+                        content = st.text_area("Indhold", value="", height=180)
+                        confidence = st.selectbox("Sikkerhed", ["Lav","Middel","Høj"], index=1)
+                        if st.form_submit_button("Gem viden"):
+                            run("INSERT INTO intelligence_memory (company_id, memory_type, title, content, confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                (company_id, memory_type, title, content, confidence, now_iso(), now_iso()))
+                            st.session_state["mem_form_version"] = st.session_state.get("mem_form_version",0) + 1
+                            st.rerun()
+
+            elif section_base == "Briefing":
+                st.markdown("### Briefing til kommende møde")
+                st.markdown(f"**Virksomhed:** {row['name']}")
+                recent_meetings = q("SELECT meeting_date, meeting_time, location, title, key_takeaways, next_steps FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC, created_at DESC LIMIT 5", (company_id,))
+                recent_obs = q("SELECT observation_date, title, observation_type, confidence, verification_status FROM observations WHERE company_id=? ORDER BY observation_date DESC, created_at DESC LIMIT 8", (company_id,))
+                if len(recent_meetings):
+                    st.markdown("**Seneste møder:**")
+                    for _, m in recent_meetings.iterrows():
+                        when = display_date(m["meeting_date"])
+                        if m["meeting_time"]: when += f" kl. {m['meeting_time']}"
+                        loc = f" ({m['location']})" if m["location"] else ""
+                        st.markdown(f"- {when}: {m['title']}{loc} — {m['key_takeaways'] or ''} {m['next_steps'] or ''}")
+                if len(recent_obs):
+                    st.markdown("**Observationer:**")
+                    for _, o in recent_obs.iterrows():
+                        st.markdown(f"- {display_date(o['observation_date'])}: {o['title']} ({o['observation_type']}, {o['confidence']}, {o['verification_status']})")
+                st.markdown("**Mulige dagsordenpunkter:**")
+                st.markdown("- Opfølgning på tidligere aftaler og åbne punkter")
+                st.markdown("- Nye observationer, der bør verificeres")
+                st.markdown("- Relevante regulatoriske/kvalitetsmæssige temaer")
+                st.markdown("- Eventuelle frister, næste skridt og mulige rådgivningsbehov")
+
+elif page == "Møder & referater":
+    st.subheader("Møder & referater")
+    df = q("""SELECT m.meeting_date AS dato, m.meeting_time AS tid, m.location AS sted, c.name AS virksomhed, m.title AS titel,
+                     m.meeting_type AS type, m.participants AS deltagere, m.key_takeaways AS læring, m.next_steps AS næste_skridt
+              FROM meetings m LEFT JOIN companies c ON c.id=m.company_id
+              ORDER BY m.meeting_date DESC, m.meeting_time DESC, m.created_at DESC""")
+    if len(df):
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Ingen møder endnu.")
+
+elif page == "Observationer":
+    st.subheader("Observationer")
+    df = q("""SELECT o.observation_date AS dato, c.name AS virksomhed, o.title AS titel, o.observation_type AS type,
+                     o.source_type AS kilde, o.confidence AS tillid, o.verification_status AS verifikation,
+                     o.implication AS betydning, o.follow_up AS opfølgning
+              FROM observations o LEFT JOIN companies c ON c.id=o.company_id
+              ORDER BY o.observation_date DESC, o.created_at DESC""")
+    if len(df):
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Ingen observationer endnu.")
+
+elif page == "Briefing":
+    st.subheader("Briefing-generator")
+    companies = q("SELECT id, name FROM companies ORDER BY name")
+    if len(companies):
+        selected = st.selectbox("Virksomhed", companies["name"].tolist())
+        cid = int(companies[companies["name"] == selected]["id"].iloc[0])
+        st.markdown(f"## Briefing: {selected}")
+
+        context = briefing_context(cid)
+
+        c1, c2 = st.columns([1, 1])
+        with c1:
+            st.markdown("### Datagrundlag")
+            for heading, sql in [
+                ("Seneste møder", "SELECT meeting_date AS dato, meeting_time AS tid, location AS sted, title AS titel, key_takeaways AS læring, next_steps AS næste_skridt FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC LIMIT 5"),
+                ("Observationer", "SELECT observation_date AS dato, title AS titel, observation_type AS type, confidence AS tillid, verification_status AS verifikation FROM observations WHERE company_id=? ORDER BY observation_date DESC LIMIT 8"),
+                ("Historik / sager", "SELECT title AS titel, case_type AS type, severity AS alvor, relevance AS relevans, summary AS resume FROM company_cases WHERE company_id=? ORDER BY period_start DESC LIMIT 5"),
+                ("Signaler", "SELECT collected_at AS dato, title AS titel, trigger_type AS trigger, score AS score FROM signals WHERE company_id=? ORDER BY collected_at DESC LIMIT 8")
+            ]:
+                df = q(sql, (cid,))
+                if len(df):
+                    st.markdown(f"**{heading}**")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+        with c2:
+            st.markdown("### Udkast til mødeforberedelse")
+            if st.button("Generér briefing"):
+                st.session_state["generated_briefing"] = ai_briefing_text(selected, context)
+            if "generated_briefing" in st.session_state:
+                st.markdown(st.session_state["generated_briefing"])
+            else:
+                st.caption("Tryk på knappen for at danne et udkast. Hvis OpenAI API-nøgle ikke er sat, laves en lokal struktureret briefing.")
+
+        with st.expander("Rå kontekst brugt til briefing"):
+            st.text_area("Kontekst", context, height=300)
+
+elif page == "Kilder":
+    st.subheader("Kildeadministration")
+    df = q("SELECT id, name AS navn, source_type AS type, url, keywords AS nøgleord, status, priority AS prioritet, last_checked AS sidst_tjekket, last_error AS seneste_fejl FROM sources ORDER BY status, priority DESC, name")
+    if len(df):
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Ingen kilder.")
+    with st.expander("Tilføj kilde"):
+        with st.form("add_source_form", clear_on_submit=True):
+            name = st.text_input("Navn")
+            source_type = st.text_input("Type")
+            url = st.text_input("URL")
+            keywords = st.text_input("Nøgleord")
+            status = st.selectbox("Status", ["Aktiv","Pauset"], index=0)
+            priority = st.selectbox("Prioritet", ["Lav","Middel","Høj"], index=1)
+            if st.form_submit_button("Gem kilde"):
+                run("INSERT INTO sources (name, source_type, url, keywords, status, priority) VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, source_type, url, keywords, status, priority))
+                st.rerun()
+
+    if len(df):
+        st.markdown("### Redigér / slet kilder")
+        for _, r in df.iterrows():
+            with st.expander(f"{r['navn']}"):
+                with st.form(f"edit_source_{int(r['id'])}"):
+                    name = st.text_input("Navn", r["navn"])
+                    source_type = st.text_input("Type", r["type"] or "")
+                    url = st.text_input("URL", r["url"] or "")
+                    keywords = st.text_input("Nøgleord", r["nøgleord"] or "")
+                    status = st.selectbox("Status", ["Aktiv","Pauset"], index=0 if r["status"]=="Aktiv" else 1)
+                    priority = st.selectbox("Prioritet", ["Lav","Middel","Høj"], index=["Lav","Middel","Høj"].index(r["prioritet"]) if r["prioritet"] in ["Lav","Middel","Høj"] else 1)
+                    if st.form_submit_button("Gem ændringer"):
+                        run("UPDATE sources SET name=?, source_type=?, url=?, keywords=?, status=?, priority=? WHERE id=?",
+                            (name, source_type, url, keywords, status, priority, int(r["id"])))
+                        st.rerun()
+                    if st.form_submit_button("Slet kilde"):
+                        run("DELETE FROM sources WHERE id=?", (int(r["id"]),))
+                        st.rerun()
+
+elif page == "Triggerregler":
+    st.subheader("Triggerregler")
+    df = q("SELECT id, name AS navn, pattern AS mønster, default_score AS score, weight AS vægt, active AS aktiv FROM trigger_rules ORDER BY weight DESC")
+    if len(df):
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("Ingen triggerregler.")
+    with st.expander("Tilføj triggerregel"):
+        with st.form("add_trigger_form", clear_on_submit=True):
+            name = st.text_input("Navn")
+            pattern = st.text_input("Mønster")
+            score = st.selectbox("Score", ["Lav","Middel","Høj","Kritisk"], index=1)
+            weight = st.number_input("Vægt", value=5)
+            active = st.checkbox("Aktiv", value=True)
+            if st.form_submit_button("Gem triggerregel"):
+                run("INSERT INTO trigger_rules (name, pattern, default_score, weight, active) VALUES (?, ?, ?, ?, ?)",
+                    (name, pattern, score, weight, 1 if active else 0))
+                st.rerun()
+
+    if len(df):
+        st.markdown("### Redigér / slet triggerregler")
+        for _, r in df.iterrows():
+            with st.expander(f"{r['navn']}"):
+                with st.form(f"edit_trigger_{int(r['id'])}"):
+                    name = st.text_input("Navn", r["navn"])
+                    pattern = st.text_input("Mønster", r["mønster"] or "")
+                    score = st.selectbox("Score", ["Lav","Middel","Høj","Kritisk"], index=["Lav","Middel","Høj","Kritisk"].index(r["score"]) if r["score"] in ["Lav","Middel","Høj","Kritisk"] else 1)
+                    weight = st.number_input("Vægt", value=int(r["vægt"]) if r["vægt"] else 5)
+                    active = st.checkbox("Aktiv", value=bool(r["aktiv"]))
+                    if st.form_submit_button("Gem ændringer"):
+                        run("UPDATE trigger_rules SET name=?, pattern=?, default_score=?, weight=?, active=? WHERE id=?",
+                            (name, pattern, score, weight, 1 if active else 0, int(r["id"])))
+                        st.rerun()
+                    if st.form_submit_button("Slet triggerregel"):
+                        run("DELETE FROM trigger_rules WHERE id=?", (int(r["id"]),))
+                        st.rerun()

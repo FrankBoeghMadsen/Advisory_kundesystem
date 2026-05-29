@@ -1,0 +1,9 @@
+Frank Advisory Intelligence Monitor v2.2.6
+
+Rettelser:
+- Korrekt navigation fra dashboard til Signalindbakke.
+- Åbn-knap flyttet tæt på virksomhedsnavnet.
+- Profilsektioner bevarer bedre kontekst efter ændringer.
+- Møder har tidspunkt og adresse/sted.
+- Dashboard viser kommende møder.
+- Uploadfelter nulstilles bedre efter gem.
