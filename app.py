@@ -364,6 +364,25 @@ def meeting_options(company_id, selected_id=None):
                 break
     return labels, values, labels.index(selected_label)
 
+def meeting_focus_context(company_id, meeting_id):
+    if not meeting_id:
+        return ""
+    meeting = q(
+        """SELECT meeting_date, meeting_time, location, title, meeting_type, participants,
+                  summary, key_takeaways, next_steps, raw_text
+           FROM meetings WHERE company_id=? AND id=?""",
+        (company_id, int(meeting_id)),
+    )
+    if not len(meeting):
+        return ""
+    row = meeting.iloc[0]
+    parts = ["\n## Møde der forberedes"]
+    for col in meeting.columns:
+        val = row[col]
+        if val:
+            parts.append(f"{col}: {val}")
+    return "\n".join(parts)
+
 def add_timeline_rows(items, df, item_type, date_col, title_col, body_cols, meta_cols=None):
     meta_cols = meta_cols or []
     if not len(df):
@@ -516,6 +535,7 @@ def briefing_context(company_id):
         parts.append(f"Kategori: {r.get('category','') if hasattr(r,'get') else r['category']}")
     for label, sql in [
         ("Seneste møder", "SELECT meeting_date, meeting_time, location, title, participants, summary, key_takeaways, next_steps FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC, created_at DESC LIMIT 10"),
+        ("Åbne opfølgninger / leads", "SELECT due_date, title, description, person, priority, status, source_type FROM followups WHERE company_id=? AND COALESCE(status,'Ny') NOT IN ('Lukket','Arkiveret') ORDER BY due_date ASC, created_at DESC LIMIT 15"),
         ("Observationer", "SELECT observation_date, title, observation_type, source_type, confidence, verification_status, content, implication, follow_up FROM observations WHERE company_id=? ORDER BY observation_date DESC, created_at DESC LIMIT 15"),
         ("Historik / sager", "SELECT title, case_type, period_start, period_end, severity, relevance, status, summary, significance, current_relevance FROM company_cases WHERE company_id=? ORDER BY period_start DESC, created_at DESC LIMIT 10"),
         ("Signaler", "SELECT collected_at, title, trigger_type, score, review_status, ai_summary, review_note FROM signals WHERE company_id=? ORDER BY collected_at DESC LIMIT 15"),
@@ -707,6 +727,7 @@ if page == "Dashboard":
                         st.rerun()
                     if b.button("Briefing", key=f"dash_meeting_briefing_{int(m['id'])}", disabled=not m["company_id"]):
                         st.session_state["selected_company_id"] = int(m["company_id"])
+                        st.session_state["selected_briefing_meeting_id"] = int(m["id"])
                         set_page("Briefing")
                         st.rerun()
         else:
@@ -1426,7 +1447,16 @@ elif page == "Briefing":
         st.session_state["selected_company_id"] = cid
         st.markdown(f"## Briefing: {selected}")
 
-        context = briefing_context(cid)
+        latest_id = latest_meeting_id(cid)
+        preferred_meeting_id = st.session_state.get("selected_briefing_meeting_id", latest_id)
+        if preferred_meeting_id and not len(q("SELECT id FROM meetings WHERE company_id=? AND id=?", (cid, int(preferred_meeting_id)))):
+            preferred_meeting_id = latest_id
+        labels, values, selected_index = meeting_options(cid, preferred_meeting_id)
+        selected_meeting = st.selectbox("Møde der forberedes", labels, index=selected_index)
+        selected_meeting_id = values[selected_meeting]
+        st.session_state["selected_briefing_meeting_id"] = selected_meeting_id
+
+        context = briefing_context(cid) + meeting_focus_context(cid, selected_meeting_id)
 
         c1, c2 = st.columns([1, 1])
         with c1:
@@ -1445,17 +1475,14 @@ elif page == "Briefing":
         with c2:
             st.markdown("### Udkast til mødeforberedelse")
             if st.button("Generér briefing"):
-                st.session_state[f"generated_briefing_{cid}"] = ai_briefing_text(selected, context)
-            generated_key = f"generated_briefing_{cid}"
+                st.session_state[f"generated_briefing_{cid}_{selected_meeting_id or 'none'}"] = ai_briefing_text(selected, context)
+            generated_key = f"generated_briefing_{cid}_{selected_meeting_id or 'none'}"
             if generated_key in st.session_state:
                 briefing_text = st.session_state[generated_key]
                 st.markdown(briefing_text)
                 with st.form(f"save_briefing_{cid}"):
                     default_title = f"Briefing - {selected} - {datetime.now().strftime('%Y-%m-%d')}"
                     title = st.text_input("Titel", default_title)
-                    latest_id = latest_meeting_id(cid)
-                    labels, values, selected_index = meeting_options(cid, latest_id)
-                    selected_meeting = st.selectbox("Knyttet til møde", labels, index=selected_index)
                     user_notes = st.text_area("Egne noter", value="", height=120)
                     if st.form_submit_button("Gem briefing på virksomheden"):
                         existing = q("SELECT MAX(version) AS max_version FROM briefings WHERE company_id=?", (cid,))
@@ -1466,7 +1493,7 @@ elif page == "Briefing":
                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 cid,
-                                values[selected_meeting],
+                                selected_meeting_id,
                                 title,
                                 briefing_text,
                                 user_notes,
