@@ -42,6 +42,8 @@ Denne MVP bruger kun konfigurerbare offentlige feeds/web-kilder. LinkedIn er ikk
 
 I den nuværende datamodel hedder den centrale aktør stadig `virksomhed`. I praksis kan den også bruges til brancheforeninger, vigtige relationer, rådgivere, kaffemødekontakter eller andre aktører, som Frank Advisory ønsker at følge over tid.
 
+Profiler kan nu markeres med en særskilt aktørtype, fx life science-virksomhed, apotek, brancheforening, person/relation, myndighed eller rådgiver/partner. Det gør det muligt at bruge samme profilvisning bredere uden at splitte systemet op for tidligt.
+
 En senere version bør overveje at omdøbe dette til `aktør`, `relation` eller `kundeemne`, så systemet ikke kun er bundet til klassiske life science-virksomheder.
 
 ## Nyt i v1.1

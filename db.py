@@ -14,6 +14,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    actor_type TEXT DEFAULT 'Life science-virksomhed',
     category TEXT DEFAULT '',
     country TEXT DEFAULT 'Danmark',
     priority TEXT DEFAULT 'Middel',
@@ -262,8 +263,10 @@ def init_db():
     backup_db_if_needed()
 
 def migrate_db(conn):
+    add_column_if_missing(conn, "companies", "actor_type", "TEXT DEFAULT 'Life science-virksomhed'")
     add_column_if_missing(conn, "companies", "aliases", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "companies", "status", "TEXT DEFAULT 'Aktiv'")
+    conn.execute("UPDATE companies SET actor_type='Life science-virksomhed' WHERE actor_type IS NULL OR actor_type=''")
     conn.execute("UPDATE companies SET status='Aktiv' WHERE status IS NULL OR status='' OR status='Monitoreres'")
 
     add_column_if_missing(conn, "sources", "status", "TEXT DEFAULT 'Aktiv'")

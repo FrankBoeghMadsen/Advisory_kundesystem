@@ -13,6 +13,16 @@ try:
 except Exception:
     pass
 
+ACTOR_TYPES = [
+    "Life science-virksomhed",
+    "Apotek",
+    "Brancheforening",
+    "Person / relation",
+    "Myndighed",
+    "Rådgiver / partner",
+    "Andet",
+]
+
 def ai_briefing_text(company_name, context_text):
     """AI briefing via OpenAI with local fallback."""
     api_key = os.getenv("OPENAI_API_KEY")
@@ -502,6 +512,7 @@ def briefing_context(company_id):
     if len(company):
         r = company.iloc[0]
         parts.append(f"Virksomhed: {r['name']}")
+        parts.append(f"Aktørtype: {r.get('actor_type','') if hasattr(r,'get') else r['actor_type']}")
         parts.append(f"Kategori: {r.get('category','') if hasattr(r,'get') else r['category']}")
     for label, sql in [
         ("Seneste møder", "SELECT meeting_date, meeting_time, location, title, participants, summary, key_takeaways, next_steps FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC, created_at DESC LIMIT 10"),
@@ -740,28 +751,32 @@ elif page == "Virksomheder":
     mode = st.radio("Visning", ["Oversigt", "Profil"], horizontal=True, key="company_view_mode")
 
     if mode == "Oversigt":
-        f1, f2, f3 = st.columns([1,1,2])
+        f1, f2, f3, f4 = st.columns([1,1,1.4,2])
         status_filter = f1.multiselect("Status", ["Aktiv","Pauset","Arkiveret"], default=["Aktiv","Pauset"])
         priority_filter = f2.multiselect("Prioritet", ["Lav","Middel","Høj"], default=["Lav","Middel","Høj"])
-        search = f3.text_input("Søg i virksomheder")
+        type_filter = f3.multiselect("Aktørtype", ACTOR_TYPES, default=ACTOR_TYPES)
+        search = f4.text_input("Søg i virksomheder")
         shown = companies.copy()
         if len(shown):
             shown = shown[shown["status"].isin(status_filter)]
             shown = shown[shown["priority"].isin(priority_filter)]
+            shown = shown[shown["actor_type"].fillna("Life science-virksomhed").isin(type_filter)]
             if search:
                 shown = shown[shown["name"].fillna("").str.contains(search, case=False, na=False) |
+                              shown["actor_type"].fillna("").str.contains(search, case=False, na=False) |
                               shown["category"].fillna("").str.contains(search, case=False, na=False) |
                               shown["aliases"].fillna("").str.contains(search, case=False, na=False)]
         if len(shown):
             for _, r in shown.iterrows():
-                cols = st.columns([0.8,3,2,1,1])
+                cols = st.columns([0.8,2.5,1.7,2,1,1])
                 if cols[0].button("Åbn", key=f"open_company_{int(r['id'])}"):
                     set_company(int(r["id"]))
                     st.rerun()
                 cols[1].markdown(f"**{r['name']}**")
-                cols[2].caption(r["category"] or "")
-                cols[3].caption(r["priority"] or "")
-                cols[4].caption(r["status"] or "")
+                cols[2].caption(r["actor_type"] or "Life science-virksomhed")
+                cols[3].caption(r["category"] or "")
+                cols[4].caption(r["priority"] or "")
+                cols[5].caption(r["status"] or "")
         else:
             st.info("Ingen virksomheder matcher filteret.")
 
@@ -778,10 +793,11 @@ elif page == "Virksomheder":
             row = q("SELECT * FROM companies WHERE id=?", (company_id,)).iloc[0]
 
             st.markdown(f"## {row['name']}")
-            meta = st.columns(3)
-            meta[0].metric("Kategori", row["category"] or "—")
-            meta[1].metric("Prioritet", row["priority"] or "—")
-            meta[2].metric("Status", row["status"] or "—")
+            meta = st.columns(4)
+            meta[0].metric("Aktørtype", row["actor_type"] or "Life science-virksomhed")
+            meta[1].metric("Kategori", row["category"] or "—")
+            meta[2].metric("Prioritet", row["priority"] or "—")
+            meta[3].metric("Status", row["status"] or "—")
             links = []
             if row["website"]: links.append(f"[Website]({row['website']})")
             if row["linkedin"]: links.append(f"[LinkedIn]({row['linkedin']})")
@@ -825,6 +841,11 @@ elif page == "Virksomheder":
             with st.expander("Redigér virksomhedsdata"):
                 with st.form("edit_company_form"):
                     name = st.text_input("Navn", row["name"])
+                    actor_type = st.selectbox(
+                        "Aktørtype",
+                        ACTOR_TYPES,
+                        index=severity_index(row["actor_type"] or "Life science-virksomhed", ACTOR_TYPES),
+                    )
                     category = st.text_area("Kategori", row["category"] or "", height=80)
                     country = st.text_input("Land", row["country"] or "Danmark")
                     priority = st.selectbox("Prioritet", ["Lav","Middel","Høj"], index=severity_index(row["priority"], ["Lav","Middel","Høj"]))
@@ -833,8 +854,8 @@ elif page == "Virksomheder":
                     website = st.text_input("Website", row["website"] or "")
                     linkedin = st.text_input("LinkedIn", row["linkedin"] or "")
                     if st.form_submit_button("Gem virksomhed"):
-                        run("UPDATE companies SET name=?, category=?, country=?, priority=?, status=?, aliases=?, website=?, linkedin=? WHERE id=?",
-                            (name, category, country, priority, status, aliases, website, linkedin, company_id)); st.rerun()
+                        run("UPDATE companies SET name=?, actor_type=?, category=?, country=?, priority=?, status=?, aliases=?, website=?, linkedin=? WHERE id=?",
+                            (name, actor_type, category, country, priority, status, aliases, website, linkedin, company_id)); st.rerun()
 
             if section_base == "Tidslinje":
                 st.markdown("### Samlet virksomhedstidslinje")
