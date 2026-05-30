@@ -147,6 +147,118 @@ def local_briefing_text(company_name, context_text):
 - Overblik over risici og næste skridt
 """
 
+def ai_meeting_followup_text(company_name, meeting_title, meeting_text, context_text):
+    """AI follow-up from meeting minutes with local fallback."""
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+
+            prompt = f"""
+Du er senior strategisk rådgiver for Frank Bøgh Madsen Advisory.
+
+Lav en konkret opfølgningsanalyse på dansk efter mødet/referatet:
+Virksomhed: {company_name}
+Møde: {meeting_title}
+
+Brug kun oplysninger fra referatet og konteksten nedenfor.
+Du må ikke opfinde fakta.
+
+Struktur:
+# Kort møderesume
+# Aftalte næste skridt
+# Åbne spørgsmål
+# Mulige rådgivningsmuligheder
+# Regulatoriske eller strategiske opmærksomhedspunkter
+# Relationer/personer at følge op med
+# Foreslået konkret opfølgning
+
+Referat:
+{meeting_text[:14000]}
+
+Kontekst:
+{context_text[:6000]}
+"""
+
+            text = ""
+            if hasattr(client, "responses"):
+                response = client.responses.create(
+                    model=model,
+                    input=prompt,
+                    temperature=0.2,
+                )
+                if hasattr(response, "output_text"):
+                    text = response.output_text
+                if not text:
+                    try:
+                        text = response.output[0].content[0].text
+                    except Exception:
+                        text = ""
+            else:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Du er en præcis dansk advisory-assistent. Brug kun den givne kontekst.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                )
+                try:
+                    text = response.choices[0].message.content or ""
+                except Exception:
+                    text = ""
+
+            if text and text.strip():
+                return text
+            return "AI-modellen returnerede ikke noget indhold."
+
+        except Exception as e:
+            return f"""# AI-fejl
+
+Der opstod en fejl ved AI-opfølgning.
+
+Fejl:
+{str(e)}
+
+Lokal fallback:
+
+{local_meeting_followup_text(company_name, meeting_title)}
+"""
+
+    return f"""# AI ikke aktiveret
+
+OPENAI_API_KEY er ikke sat på computeren.
+
+Systemet bruger derfor lokal opfølgningsskabelon.
+
+{local_meeting_followup_text(company_name, meeting_title)}
+"""
+
+def local_meeting_followup_text(company_name, meeting_title):
+    return f"""# Opfølgning: {company_name}
+
+## Kort møderesume
+- Gennemgå referatet manuelt og fasthold de vigtigste aftaler.
+
+## Aftalte næste skridt
+- Identificér konkrete opfølgningspunkter, ansvarlige personer og frister.
+
+## Åbne spørgsmål
+- Hvad mangler at blive verificeret?
+- Hvem bør kontaktes næste gang?
+
+## Mulige rådgivningsmuligheder
+- Vurdér om der er behov for regulatorisk, strategisk eller kvalitetsmæssig sparring.
+
+## Foreslået konkret opfølgning
+- Opret relevante noter, observationer eller mødeopgaver ud fra referatet.
+"""
+
 try:
     from document_utils import extract_text_from_file, simple_meeting_summary
 except Exception:
@@ -698,6 +810,33 @@ elif page == "Virksomheder":
                                         height=260,
                                         key=f"meeting_raw_text_{int(m['id'])}",
                                     )
+                                followup_key = f"meeting_ai_followup_{int(m['id'])}"
+                                if st.button("Lav AI-opfølgning på referat", key=f"generate_followup_{int(m['id'])}"):
+                                    st.session_state[followup_key] = ai_meeting_followup_text(
+                                        row["name"],
+                                        m["title"],
+                                        m["raw_text"],
+                                        briefing_context(company_id),
+                                    )
+                                if followup_key in st.session_state:
+                                    st.markdown("**AI-opfølgning**")
+                                    st.markdown(st.session_state[followup_key])
+                                    with st.form(f"save_followup_note_{int(m['id'])}"):
+                                        note_title = st.text_input(
+                                            "Notetitel",
+                                            f"AI-opfølgning - {m['title']} - {m['meeting_date'] or datetime.now().strftime('%Y-%m-%d')}",
+                                        )
+                                        note_text = st.text_area(
+                                            "Opfølgningstekst",
+                                            st.session_state[followup_key],
+                                            height=240,
+                                        )
+                                        if st.form_submit_button("Gem som note på virksomheden"):
+                                            run(
+                                                "INSERT INTO notes (company_id, title, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                                                (company_id, note_title, note_text, now_iso(), now_iso()),
+                                            )
+                                            st.success("AI-opfølgning gemt som note.")
                             with st.expander("Redigér / slet møde"):
                                 with st.form(f"edit_meeting_{int(m['id'])}"):
                                     title = st.text_input("Titel", m["title"])
