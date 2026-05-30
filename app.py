@@ -337,6 +337,26 @@ def short(text, n=900):
     text = text or ""
     return text if len(text) <= n else text[:n] + "..."
 
+def sync_actor_sources(actor_name, website, linkedin, aliases="", actor_status="Aktiv"):
+    keywords = "|".join([part for part in [actor_name, aliases] if part])
+    source_status = "Aktiv" if actor_status == "Aktiv" else "Pauset"
+    for label, url, source_type, status, active in [
+        ("Website", website, "web", source_status, 1 if source_status == "Aktiv" else 0),
+        ("LinkedIn", linkedin, "reference", "Pauset", 0),
+    ]:
+        clean_url = (url or "").strip()
+        if not clean_url:
+            continue
+        existing = q("SELECT id FROM sources WHERE url=?", (clean_url,))
+        if len(existing):
+            continue
+        run(
+            """INSERT INTO sources
+               (name, source_type, url, keywords, active, status, priority, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (f"{actor_name} - {label}", source_type, clean_url, keywords, active, status, "Middel", now_iso()),
+        )
+
 def field_label(name):
     labels = {
         "summary": "Resume",
@@ -873,6 +893,7 @@ elif page == "Virksomheder":
                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                 (clean_name, actor_type, category, country, priority, website, linkedin, status, aliases, now_iso()),
                             )
+                            sync_actor_sources(clean_name, website, linkedin, aliases, status)
                             created = q("SELECT id FROM companies WHERE name=?", (clean_name,))
                             if len(created):
                                 st.session_state["selected_company_id"] = int(created["id"].iloc[0])
@@ -987,7 +1008,9 @@ elif page == "Virksomheder":
                     linkedin = st.text_input("LinkedIn", row["linkedin"] or "")
                     if st.form_submit_button("Gem virksomhed"):
                         run("UPDATE companies SET name=?, actor_type=?, category=?, country=?, priority=?, status=?, aliases=?, website=?, linkedin=? WHERE id=?",
-                            (name, actor_type, category, country, priority, status, aliases, website, linkedin, company_id)); st.rerun()
+                            (name, actor_type, category, country, priority, status, aliases, website, linkedin, company_id))
+                        sync_actor_sources(name, website, linkedin, aliases, status)
+                        st.rerun()
 
             if section_base == "Tidslinje":
                 st.markdown("### Samlet virksomhedstidslinje")
@@ -1668,8 +1691,8 @@ elif page == "Kilder":
             status = st.selectbox("Status", ["Aktiv","Pauset"], index=0)
             priority = st.selectbox("Prioritet", ["Lav","Middel","Høj"], index=1)
             if st.form_submit_button("Gem kilde"):
-                run("INSERT INTO sources (name, source_type, url, keywords, status, priority) VALUES (?, ?, ?, ?, ?, ?)",
-                    (name, source_type, url, keywords, status, priority))
+                run("INSERT INTO sources (name, source_type, url, keywords, active, status, priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (name, source_type, url, keywords, 1 if status == "Aktiv" else 0, status, priority, now_iso()))
                 st.rerun()
 
     if len(df):
@@ -1684,8 +1707,8 @@ elif page == "Kilder":
                     status = st.selectbox("Status", ["Aktiv","Pauset"], index=0 if r["status"]=="Aktiv" else 1)
                     priority = st.selectbox("Prioritet", ["Lav","Middel","Høj"], index=["Lav","Middel","Høj"].index(r["prioritet"]) if r["prioritet"] in ["Lav","Middel","Høj"] else 1)
                     if st.form_submit_button("Gem ændringer"):
-                        run("UPDATE sources SET name=?, source_type=?, url=?, keywords=?, status=?, priority=? WHERE id=?",
-                            (name, source_type, url, keywords, status, priority, int(r["id"])))
+                        run("UPDATE sources SET name=?, source_type=?, url=?, keywords=?, active=?, status=?, priority=? WHERE id=?",
+                            (name, source_type, url, keywords, 1 if status == "Aktiv" else 0, status, priority, int(r["id"])))
                         st.rerun()
                     if st.form_submit_button("Slet kilde"):
                         run("DELETE FROM sources WHERE id=?", (int(r["id"]),))
