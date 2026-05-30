@@ -213,7 +213,9 @@ CREATE TABLE IF NOT EXISTS followups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER,
     title TEXT NOT NULL,
+    followup_type TEXT DEFAULT 'Opfølgning',
     description TEXT DEFAULT '',
+    next_action TEXT DEFAULT '',
     person TEXT DEFAULT '',
     due_date TEXT DEFAULT '',
     priority TEXT DEFAULT 'Middel',
@@ -297,7 +299,9 @@ def migrate_db(conn):
     add_column_if_missing(conn, "briefings", "updated_at", "TEXT DEFAULT ''")
 
     add_column_if_missing(conn, "followups", "company_id", "INTEGER")
+    add_column_if_missing(conn, "followups", "followup_type", "TEXT DEFAULT 'Opfølgning'")
     add_column_if_missing(conn, "followups", "description", "TEXT DEFAULT ''")
+    add_column_if_missing(conn, "followups", "next_action", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "followups", "person", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "followups", "due_date", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "followups", "priority", "TEXT DEFAULT 'Middel'")
@@ -305,6 +309,7 @@ def migrate_db(conn):
     add_column_if_missing(conn, "followups", "source_type", "TEXT DEFAULT 'Manuel'")
     add_column_if_missing(conn, "followups", "source_id", "INTEGER")
     add_column_if_missing(conn, "followups", "updated_at", "TEXT DEFAULT ''")
+    conn.execute("UPDATE followups SET followup_type='Opfølgning' WHERE followup_type IS NULL OR followup_type=''")
 
 def seed_if_empty(conn):
     cur = conn.execute("SELECT COUNT(*) AS n FROM companies")
