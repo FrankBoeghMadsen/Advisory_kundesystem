@@ -749,6 +749,9 @@ if page == "Dashboard":
                         due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
                         st.caption(f"{f['followup_type']} · {due}")
                         st.write(short(f["title"], 80))
+                        if st.button("Åbn", key=f"pipeline_open_{int(f['id'])}", disabled=not f["company_id"]):
+                            open_company_section(int(f["company_id"]), "Opfølgning")
+                            st.rerun()
 
         st.markdown("### Signalpåmindelse")
         new_count = int((signals["review_status"] == "Ny").sum()) if len(signals) else 0
