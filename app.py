@@ -688,8 +688,7 @@ if page == "Dashboard":
     linkedin_refs = q("""SELECT s.id, s.name, s.url, s.keywords, c.id AS company_id, c.name AS company
                          FROM sources s
                          LEFT JOIN companies c ON s.url=c.linkedin
-                         WHERE s.source_type='reference'
-                           AND (LOWER(s.name) LIKE '%linkedin%' OR LOWER(s.url) LIKE '%linkedin%')
+                         WHERE (LOWER(s.name) LIKE '%linkedin%' OR LOWER(s.url) LIKE '%linkedin%')
                            AND COALESCE(s.priority, 'Middel')='Høj'
                          ORDER BY s.name
                          LIMIT 12""")
@@ -1014,11 +1013,15 @@ elif page == "Virksomheder":
             row = q("SELECT * FROM companies WHERE id=?", (company_id,)).iloc[0]
 
             st.markdown(f"## {row['name']}")
-            meta = st.columns(4)
-            meta[0].metric("Aktørtype", row["actor_type"] or "Life science-virksomhed")
-            meta[1].metric("Kategori", row["category"] or "—")
-            meta[2].metric("Prioritet", row["priority"] or "—")
-            meta[3].metric("Status", row["status"] or "—")
+            meta = st.columns([1.4, 2.2, 1, 1])
+            meta[0].caption("Aktørtype")
+            meta[0].markdown(f"**{row['actor_type'] or 'Life science-virksomhed'}**")
+            meta[1].caption("Kategori")
+            meta[1].markdown(f"**{row['category'] or '—'}**")
+            meta[2].caption("Prioritet")
+            meta[2].markdown(f"**{row['priority'] or '—'}**")
+            meta[3].caption("Status")
+            meta[3].markdown(f"**{row['status'] or '—'}**")
             links = []
             if row["website"]: links.append(f"[Website]({row['website']})")
             if row["linkedin"]: links.append(f"[LinkedIn]({row['linkedin']})")
@@ -1410,7 +1413,7 @@ elif page == "Virksomheder":
                 if len(contacts):
                     for _, c in contacts.iterrows():
                         with st.container(border=True):
-                            col1, col2, col3 = st.columns([2.2, 2.2, 1.2])
+                            col1, col2 = st.columns([1.4, 1])
                             col1.markdown(f"**{c['name']}**")
                             col2.caption(c["role"] or "")
                             if c["email"]:
@@ -1421,12 +1424,14 @@ elif page == "Virksomheder":
                                 col2.markdown(f"[LinkedIn]({c['linkedin']})")
                             if c["notes"]:
                                 st.caption(c["notes"])
-                            with col3.expander("Ret/slet"):
+                            with st.expander("Redigér / slet kontakt"):
                                 with st.form(f"edit_contact_{int(c['id'])}"):
-                                    name = st.text_input("Navn", c["name"])
-                                    role = st.text_input("Rolle", c["role"] or "")
-                                    phone = st.text_input("Telefon", c["phone"] or "")
-                                    email = st.text_input("Email", c["email"] or "")
+                                    r1, r2 = st.columns(2)
+                                    name = r1.text_input("Navn", c["name"])
+                                    role = r2.text_input("Rolle", c["role"] or "")
+                                    r3, r4 = st.columns(2)
+                                    phone = r3.text_input("Telefon", c["phone"] or "")
+                                    email = r4.text_input("Email", c["email"] or "")
                                     linkedin = st.text_input("LinkedIn", c["linkedin"] or "")
                                     notes = st.text_area("Noter", c["notes"] or "", height=90)
                                     if st.form_submit_button("Gem"):
