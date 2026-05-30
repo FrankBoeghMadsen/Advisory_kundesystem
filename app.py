@@ -1,6 +1,6 @@
 
 import streamlit as st
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from db import init_db, fetch_df, execute, connect, DATA_DIR, UPLOAD_DIR
 from monitor import run_monitor
@@ -474,6 +474,27 @@ def set_company(company_id):
     st.session_state["selected_company_id"] = int(company_id)
     st.session_state["force_profile_view"] = True
 
+def open_company_section(company_id, section):
+    st.session_state["selected_company_id"] = int(company_id)
+    st.session_state[f"profile_section_{int(company_id)}"] = section
+    st.session_state["force_profile_view"] = True
+    st.session_state["page"] = "Virksomheder"
+
+def followup_group(row, today_iso):
+    due = str(row.get("due_date", "") or "").strip()
+    if not due:
+        return "Uden dato"
+    if len(due) >= 10 and due[4:5] == "-" and due[7:8] == "-":
+        try:
+            due_date = date.fromisoformat(due[:10])
+            today_date = date.fromisoformat(today_iso)
+            if due_date < today_date:
+                return "Forfaldne"
+            if due_date <= today_date + timedelta(days=30):
+                return "Næste 30 dage"
+        except ValueError:
+            pass
+    return "Planlagt senere"
 
 def briefing_context(company_id):
     parts = []
@@ -571,22 +592,31 @@ if page == "Dashboard":
         st.subheader(f"Dashboard · {display_date(date.today().isoformat())}")
         st.markdown("### Næste handlinger / leads")
         if len(followups):
-            for _, f in followups.head(8).iterrows():
-                with st.container(border=True):
-                    due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
-                    company = f["company"] or "Ingen virksomhed"
-                    person = f" · {f['person']}" if f["person"] else ""
-                    st.markdown(f"**{f['title']}**")
-                    st.caption(f"{company}{person} · {due} · {f['priority']} · {f['status']}")
-                    if f["description"]:
-                        st.write(short(f["description"], 220))
-                    a, b = st.columns(2)
-                    if a.button("I gang", key=f"dash_follow_progress_{int(f['id'])}"):
-                        run("UPDATE followups SET status=?, updated_at=? WHERE id=?", ("I gang", now_iso(), int(f["id"])))
-                        st.rerun()
-                    if b.button("Luk", key=f"dash_follow_close_{int(f['id'])}"):
-                        run("UPDATE followups SET status=?, updated_at=? WHERE id=?", ("Lukket", now_iso(), int(f["id"])))
-                        st.rerun()
+            today_iso = date.today().isoformat()
+            followups["dashboard_group"] = followups.apply(lambda row: followup_group(row, today_iso), axis=1)
+            for group_name in ["Forfaldne", "Næste 30 dage", "Uden dato", "Planlagt senere"]:
+                group_df = followups[followups["dashboard_group"] == group_name]
+                if len(group_df):
+                    st.markdown(f"**{group_name} ({len(group_df)})**")
+                    for _, f in group_df.head(6).iterrows():
+                        with st.container(border=True):
+                            due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
+                            company = f["company"] or "Ingen virksomhed"
+                            person = f" · {f['person']}" if f["person"] else ""
+                            st.markdown(f"**{f['title']}**")
+                            st.caption(f"{company}{person} · {due} · {f['priority']} · {f['status']}")
+                            if f["description"]:
+                                st.write(short(f["description"], 220))
+                            a, b, c = st.columns(3)
+                            if a.button("Åbn profil", key=f"dash_follow_open_{int(f['id'])}", disabled=not f["company_id"]):
+                                open_company_section(int(f["company_id"]), "Opfølgning")
+                                st.rerun()
+                            if b.button("I gang", key=f"dash_follow_progress_{int(f['id'])}"):
+                                run("UPDATE followups SET status=?, updated_at=? WHERE id=?", ("I gang", now_iso(), int(f["id"])))
+                                st.rerun()
+                            if c.button("Luk", key=f"dash_follow_close_{int(f['id'])}"):
+                                run("UPDATE followups SET status=?, updated_at=? WHERE id=?", ("Lukket", now_iso(), int(f["id"])))
+                                st.rerun()
         else:
             st.success("Ingen åbne opfølgninger.")
 
