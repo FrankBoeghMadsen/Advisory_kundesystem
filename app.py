@@ -219,6 +219,29 @@ def latest_meeting_id(company_id):
         return int(df["id"].iloc[0])
     return None
 
+def meeting_options(company_id, selected_id=None):
+    meetings = q(
+        "SELECT id, meeting_date, meeting_time, title FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC, created_at DESC",
+        (company_id,),
+    )
+    labels = ["Ingen mødekobling"]
+    values = {"Ingen mødekobling": None}
+    for _, meeting in meetings.iterrows():
+        when = display_date(meeting["meeting_date"]) or "Ukendt dato"
+        if meeting["meeting_time"]:
+            when += f" kl. {meeting['meeting_time']}"
+        label = f"{when} - {meeting['title'] or 'Møde'}"
+        values[label] = int(meeting["id"])
+        labels.append(label)
+
+    selected_label = "Ingen mødekobling"
+    if selected_id:
+        for label, value in values.items():
+            if value == int(selected_id):
+                selected_label = label
+                break
+    return labels, values, labels.index(selected_label)
+
 def add_timeline_rows(items, df, item_type, date_col, title_col, body_cols, meta_cols=None):
     meta_cols = meta_cols or []
     if not len(df):
@@ -306,12 +329,19 @@ def company_timeline(company_id):
     )
     add_timeline_rows(
         items,
-        q("SELECT created_at, title, briefing_text, user_notes, version, status FROM briefings WHERE company_id=?", (company_id,)),
+        q("""SELECT b.created_at, b.title, b.briefing_text, b.user_notes, b.version, b.status,
+                    CASE
+                        WHEN m.id IS NOT NULL THEN COALESCE(m.meeting_date, '') || ' - ' || COALESCE(m.title, 'Møde')
+                        ELSE ''
+                    END AS linked_meeting
+             FROM briefings b
+             LEFT JOIN meetings m ON m.id=b.meeting_id
+             WHERE b.company_id=?""", (company_id,)),
         "Briefing",
         "created_at",
         "title",
         ["briefing_text", "user_notes"],
-        ["version", "status"],
+        ["linked_meeting", "version", "status"],
     )
     return sorted(items, key=lambda item: item["sort_date"] or "", reverse=True)
 
@@ -905,7 +935,11 @@ elif page == "Virksomheder":
                 st.markdown("### Briefing til kommende møde")
                 st.markdown(f"**Virksomhed:** {row['name']}")
                 saved_briefings = q(
-                    "SELECT * FROM briefings WHERE company_id=? ORDER BY created_at DESC, id DESC",
+                    """SELECT b.*, m.title AS meeting_title, m.meeting_date, m.meeting_time
+                       FROM briefings b
+                       LEFT JOIN meetings m ON m.id=b.meeting_id
+                       WHERE b.company_id=?
+                       ORDER BY b.created_at DESC, b.id DESC""",
                     (company_id,),
                 )
                 if len(saved_briefings):
@@ -914,6 +948,11 @@ elif page == "Virksomheder":
                         with st.container(border=True):
                             st.markdown(f"**{b['title']}**")
                             st.caption(f"Oprettet: {display_date(b['created_at'])} · version {int(b['version'] or 1)} · {b['status']}")
+                            if b["meeting_id"]:
+                                meeting_label = display_date(b["meeting_date"]) or "Ukendt dato"
+                                if b["meeting_time"]:
+                                    meeting_label += f" kl. {b['meeting_time']}"
+                                st.caption(f"Knyttet til møde: {meeting_label} - {b['meeting_title'] or 'Møde'}")
                             st.markdown(b["briefing_text"])
                             if b["user_notes"]:
                                 st.markdown("**Egne noter**")
@@ -921,14 +960,16 @@ elif page == "Virksomheder":
                             with st.expander("Redigér / slet briefing"):
                                 with st.form(f"edit_briefing_{int(b['id'])}"):
                                     title = st.text_input("Titel", b["title"])
+                                    labels, values, selected_index = meeting_options(company_id, b["meeting_id"])
+                                    selected_meeting = st.selectbox("Knyttet til møde", labels, index=selected_index)
                                     briefing_text = st.text_area("Briefing", b["briefing_text"], height=260)
                                     user_notes = st.text_area("Egne noter", b["user_notes"] or "", height=120)
                                     status = st.selectbox("Status", ["Aktiv", "Arkiveret"], index=severity_index(b["status"], ["Aktiv", "Arkiveret"]))
                                     a, c = st.columns(2)
                                     if a.form_submit_button("Gem ændringer"):
                                         run(
-                                            "UPDATE briefings SET title=?, briefing_text=?, user_notes=?, status=?, updated_at=? WHERE id=?",
-                                            (title, briefing_text, user_notes, status, now_iso(), int(b["id"])),
+                                            "UPDATE briefings SET title=?, meeting_id=?, briefing_text=?, user_notes=?, status=?, updated_at=? WHERE id=?",
+                                            (title, values[selected_meeting], briefing_text, user_notes, status, now_iso(), int(b["id"])),
                                         )
                                         st.rerun()
                                     if c.form_submit_button("Slet briefing"):
@@ -1041,6 +1082,9 @@ elif page == "Briefing":
                 with st.form(f"save_briefing_{cid}"):
                     default_title = f"Briefing - {selected} - {datetime.now().strftime('%Y-%m-%d')}"
                     title = st.text_input("Titel", default_title)
+                    latest_id = latest_meeting_id(cid)
+                    labels, values, selected_index = meeting_options(cid, latest_id)
+                    selected_meeting = st.selectbox("Knyttet til møde", labels, index=selected_index)
                     user_notes = st.text_area("Egne noter", value="", height=120)
                     if st.form_submit_button("Gem briefing på virksomheden"):
                         existing = q("SELECT MAX(version) AS max_version FROM briefings WHERE company_id=?", (cid,))
@@ -1051,7 +1095,7 @@ elif page == "Briefing":
                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                             (
                                 cid,
-                                latest_meeting_id(cid),
+                                values[selected_meeting],
                                 title,
                                 briefing_text,
                                 user_notes,
