@@ -357,6 +357,18 @@ def sync_actor_sources(actor_name, website, linkedin, aliases="", actor_status="
             (f"{actor_name} - {label}", source_type, clean_url, keywords, active, status, "Middel", now_iso()),
         )
 
+def sync_existing_actor_sources(companies_df):
+    if not len(companies_df):
+        return
+    for _, actor in companies_df.iterrows():
+        sync_actor_sources(
+            actor["name"],
+            actor.get("website", "") if hasattr(actor, "get") else actor["website"],
+            actor.get("linkedin", "") if hasattr(actor, "get") else actor["linkedin"],
+            actor.get("aliases", "") if hasattr(actor, "get") else actor["aliases"],
+            actor.get("status", "Aktiv") if hasattr(actor, "get") else actor["status"],
+        )
+
 def field_label(name):
     labels = {
         "summary": "Resume",
@@ -655,6 +667,7 @@ if page == "Dashboard":
                    FROM signals s LEFT JOIN companies c ON c.id=s.company_id
                    ORDER BY s.collected_at DESC""")
     companies = q("SELECT * FROM companies")
+    sync_existing_actor_sources(companies)
     meetings = q("SELECT m.*, c.name AS company FROM meetings m LEFT JOIN companies c ON c.id=m.company_id ORDER BY m.meeting_date ASC, m.meeting_time ASC")
     observations = q("SELECT * FROM observations")
     followups = q("""SELECT f.*, c.name AS company
