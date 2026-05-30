@@ -576,6 +576,7 @@ with st.sidebar:
 page = st.session_state["page"]
 
 if page == "Dashboard":
+    today_iso = date.today().isoformat()
     signals = q("""SELECT s.id, s.collected_at, c.name AS company, s.trigger_type, s.score,
                           s.title, COALESCE(s.review_status,'Ny') AS review_status
                    FROM signals s LEFT JOIN companies c ON c.id=s.company_id
@@ -591,16 +592,43 @@ if page == "Dashboard":
                         CASE WHEN f.due_date='' OR f.due_date IS NULL THEN 1 ELSE 0 END,
                         f.due_date ASC,
                         f.created_at DESC""")
+    if len(followups):
+        followups["dashboard_group"] = followups.apply(lambda row: followup_group(row, today_iso), axis=1)
+    upcoming = q("""SELECT m.id, m.company_id, m.meeting_date, m.meeting_time, m.location, m.title, c.name AS company
+                    FROM meetings m LEFT JOIN companies c ON c.id=m.company_id
+                    WHERE m.meeting_date >= ?
+                    ORDER BY m.meeting_date ASC, m.meeting_time ASC
+                    LIMIT 8""", (today_iso,))
+    overdue_count = int((followups["dashboard_group"] == "Forfaldne").sum()) if len(followups) else 0
+    next30_count = int((followups["dashboard_group"] == "Næste 30 dage").sum()) if len(followups) else 0
+    new_signal_count = int((signals["review_status"] == "Ny").sum()) if len(signals) else 0
     cols = st.columns(5)
-    cols[0].metric("Nye signaler", int((signals["review_status"] == "Ny").sum()) if len(signals) else 0)
-    cols[1].metric("Til vurdering", int((signals["review_status"] == "Til vurdering").sum()) if len(signals) else 0)
-    cols[2].metric("Virksomheder", len(companies))
-    cols[3].metric("Møder", len(meetings))
-    cols[4].metric("Opfølgninger", len(followups))
+    cols[0].metric("Forfaldne", overdue_count)
+    cols[1].metric("Næste 30 dage", next30_count)
+    cols[2].metric("Kommende møder", len(upcoming))
+    cols[3].metric("Nye signaler", new_signal_count)
+    cols[4].metric("Åbne leads", len(followups))
 
     c1, c2 = st.columns(2)
     with c1:
         st.subheader(f"Dashboard · {display_date(date.today().isoformat())}")
+        st.markdown("### Dagens fokus")
+        if overdue_count:
+            st.warning(f"{overdue_count} opfølgning(er) er forfaldne.")
+        elif next30_count:
+            st.info(f"{next30_count} opfølgning(er) ligger inden for de næste 30 dage.")
+        else:
+            st.success("Ingen daterede opfølgninger kræver akut handling.")
+        if len(upcoming):
+            next_meeting = upcoming.iloc[0]
+            when = display_date(next_meeting["meeting_date"])
+            if next_meeting["meeting_time"]:
+                when += f" kl. {next_meeting['meeting_time']}"
+            st.markdown(f"**Næste møde:** {when} — {next_meeting['company'] or 'Ukendt aktør'}")
+            st.caption(next_meeting["title"] or "Møde")
+        if new_signal_count:
+            st.caption(f"{new_signal_count} nye signaler bør gennemgås i Signalindbakken.")
+
         with st.expander("Tilføj opfølgning / lead", expanded=False):
             with st.form(f"dashboard_add_followup_{st.session_state.get('dashboard_followup_form_version',0)}", clear_on_submit=True):
                 company_labels = ["Ingen aktør"] + companies["name"].tolist() if len(companies) else ["Ingen aktør"]
@@ -627,8 +655,6 @@ if page == "Dashboard":
 
         st.markdown("### Næste handlinger / leads")
         if len(followups):
-            today_iso = date.today().isoformat()
-            followups["dashboard_group"] = followups.apply(lambda row: followup_group(row, today_iso), axis=1)
             for group_name in ["Forfaldne", "Næste 30 dage", "Uden dato", "Planlagt senere"]:
                 group_df = followups[followups["dashboard_group"] == group_name]
                 if len(group_df):
@@ -667,22 +693,22 @@ if page == "Dashboard":
             st.rerun()
     with c2:
         st.subheader("Kommende møder / husketing")
-        today = date.today().isoformat()
-        upcoming = q("""SELECT m.meeting_date, m.meeting_time, m.location, m.title, c.name AS company
-                        FROM meetings m LEFT JOIN companies c ON c.id=m.company_id
-                        WHERE m.meeting_date >= ?
-                        ORDER BY m.meeting_date ASC, m.meeting_time ASC
-                        LIMIT 8""", (today,))
         if len(upcoming):
             for _, m in upcoming.iterrows():
-                when = display_date(m["meeting_date"])
-                if m["meeting_time"]:
-                    when += f" kl. {m['meeting_time']}"
-                st.markdown(f"**{when} — {m['company']}**")
-                st.caption(f"{m['title'] or 'Møde'}" + (f" · {m['location']}" if m["location"] else ""))
-            if st.button("Gå til Briefing"):
-                set_page("Briefing")
-                st.rerun()
+                with st.container(border=True):
+                    when = display_date(m["meeting_date"])
+                    if m["meeting_time"]:
+                        when += f" kl. {m['meeting_time']}"
+                    st.markdown(f"**{when} — {m['company'] or 'Ukendt aktør'}**")
+                    st.caption(f"{m['title'] or 'Møde'}" + (f" · {m['location']}" if m["location"] else ""))
+                    a, b = st.columns(2)
+                    if a.button("Åbn profil", key=f"dash_meeting_profile_{int(m['id'])}", disabled=not m["company_id"]):
+                        open_company_section(int(m["company_id"]), "Møder")
+                        st.rerun()
+                    if b.button("Briefing", key=f"dash_meeting_briefing_{int(m['id'])}", disabled=not m["company_id"]):
+                        st.session_state["selected_company_id"] = int(m["company_id"])
+                        set_page("Briefing")
+                        st.rerun()
         else:
             st.caption("Ingen kommende møder registreret.")
 
@@ -1392,8 +1418,12 @@ elif page == "Briefing":
     st.subheader("Briefing-generator")
     companies = q("SELECT id, name FROM companies ORDER BY name")
     if len(companies):
-        selected = st.selectbox("Virksomhed", companies["name"].tolist())
+        company_ids = companies["id"].tolist()
+        default_id = st.session_state.get("selected_company_id", company_ids[0])
+        default_index = company_ids.index(default_id) if default_id in company_ids else 0
+        selected = st.selectbox("Virksomhed", companies["name"].tolist(), index=default_index)
         cid = int(companies[companies["name"] == selected]["id"].iloc[0])
+        st.session_state["selected_company_id"] = cid
         st.markdown(f"## Briefing: {selected}")
 
         context = briefing_context(cid)
