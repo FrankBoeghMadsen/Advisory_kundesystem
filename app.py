@@ -672,6 +672,13 @@ if page == "Dashboard":
                     WHERE m.meeting_date >= ?
                     ORDER BY m.meeting_date ASC, m.meeting_time ASC
                     LIMIT 8""", (today_iso,))
+    linkedin_refs = q("""SELECT s.id, s.name, s.url, s.keywords, c.id AS company_id, c.name AS company
+                         FROM sources s
+                         LEFT JOIN companies c ON s.url=c.linkedin
+                         WHERE s.source_type='reference'
+                           AND (LOWER(s.name) LIKE '%linkedin%' OR LOWER(s.url) LIKE '%linkedin%')
+                         ORDER BY s.name
+                         LIMIT 12""")
     overdue_count = int((followups["dashboard_group"] == "Forfaldne").sum()) if len(followups) else 0
     next30_count = int((followups["dashboard_group"] == "Næste 30 dage").sum()) if len(followups) else 0
     new_signal_count = int((signals["review_status"] == "Ny").sum()) if len(signals) else 0
@@ -804,6 +811,52 @@ if page == "Dashboard":
                         st.rerun()
         else:
             st.caption("Ingen kommende møder registreret.")
+
+        st.subheader("LinkedIn-referencekilder")
+        if len(linkedin_refs):
+            for _, src in linkedin_refs.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**{src['company'] or src['name']}**")
+                    st.caption("Manuel referencekilde")
+                    if src["url"]:
+                        st.link_button("Åbn LinkedIn", src["url"])
+                    with st.expander("Gem LinkedIn-opslag som observation"):
+                        if not src["company_id"]:
+                            st.info("Kilden er ikke koblet direkte til en aktør. Gem observationen fra aktørprofilen i stedet.")
+                        else:
+                            with st.form(f"linkedin_obs_{int(src['id'])}", clear_on_submit=True):
+                                title = st.text_input("Titel", value=f"LinkedIn-opslag - {src['company']}")
+                                observation_date = st.text_input("Dato", value=today_iso)
+                                post_url = st.text_input("Opslags-URL", value="")
+                                content = st.text_area("Indhold / uddrag fra opslag", value="", height=120)
+                                implication = st.text_area("Mulig betydning", value="", height=90)
+                                follow_up = st.text_area("Opfølgning", value="", height=90)
+                                if st.form_submit_button("Gem observation"):
+                                    observation_content = content
+                                    if post_url:
+                                        observation_content = f"{content}\n\nLinkedIn-URL: {post_url}".strip()
+                                    run(
+                                        """INSERT INTO observations
+                                           (company_id, observation_date, title, observation_type, source_type, confidence, verification_status, content, implication, follow_up, created_at, updated_at)
+                                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                        (
+                                            int(src["company_id"]),
+                                            observation_date,
+                                            title,
+                                            "OSINT-signal",
+                                            "LinkedIn",
+                                            "Middel",
+                                            "Bør verificeres",
+                                            observation_content,
+                                            implication,
+                                            follow_up,
+                                            now_iso(),
+                                            now_iso(),
+                                        ),
+                                    )
+                                    st.success("LinkedIn-observation gemt på aktørprofilen.")
+        else:
+            st.caption("Ingen LinkedIn-referencekilder endnu.")
 
 elif page == "Signalindbakke":
     st.subheader("Signalindbakke")
