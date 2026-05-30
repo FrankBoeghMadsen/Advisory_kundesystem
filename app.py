@@ -196,6 +196,7 @@ def set_page(name):
 
 def set_company(company_id):
     st.session_state["selected_company_id"] = int(company_id)
+    st.session_state["company_view_mode"] = "Profil"
     st.session_state["force_profile_view"] = True
 
 
@@ -374,8 +375,11 @@ elif page == "Signalindbakke":
 elif page == "Virksomheder":
     st.subheader("Virksomheder")
     companies = q("SELECT * FROM companies ORDER BY name")
-    default_mode_index = 1 if st.session_state.pop("force_profile_view", False) else 0
-    mode = st.radio("Visning", ["Oversigt", "Profil"], horizontal=True, index=default_mode_index)
+    if st.session_state.pop("force_profile_view", False):
+        st.session_state["company_view_mode"] = "Profil"
+    if st.session_state.get("company_view_mode") not in ["Oversigt", "Profil"]:
+        st.session_state["company_view_mode"] = "Oversigt"
+    mode = st.radio("Visning", ["Oversigt", "Profil"], horizontal=True, key="company_view_mode")
 
     if mode == "Oversigt":
         f1, f2, f3 = st.columns([1,1,2])
@@ -433,9 +437,26 @@ elif page == "Virksomheder":
             note_n = count_for("notes", company_id)
             mem_n = count_for("intelligence_memory", company_id)
 
-            sections = [f"Signaler ({sig_n})", f"Møder ({meet_n})", f"Observationer ({obs_n})", f"Historik / Sager ({case_n})", f"Kontakter ({contact_n})", f"Noter ({note_n})", f"Videnbank ({mem_n})", "Briefing"]
-            section = st.radio("Profilsektion", sections, horizontal=True, key="profile_section")
-            section_base = section.split(" (")[0]
+            section_counts = {
+                "Signaler": sig_n,
+                "Møder": meet_n,
+                "Observationer": obs_n,
+                "Historik / Sager": case_n,
+                "Kontakter": contact_n,
+                "Noter": note_n,
+                "Videnbank": mem_n,
+            }
+            sections = ["Signaler", "Møder", "Observationer", "Historik / Sager", "Kontakter", "Noter", "Videnbank", "Briefing"]
+            section_key = f"profile_section_{company_id}"
+            if st.session_state.get(section_key) not in sections:
+                st.session_state[section_key] = "Signaler"
+            section_base = st.radio(
+                "Profilsektion",
+                sections,
+                horizontal=True,
+                key=section_key,
+                format_func=lambda name: f"{name} ({section_counts[name]})" if name in section_counts else name,
+            )
 
             with st.expander("Redigér virksomhedsdata"):
                 with st.form("edit_company_form"):
