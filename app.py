@@ -182,6 +182,25 @@ def short(text, n=900):
     text = text or ""
     return text if len(text) <= n else text[:n] + "..."
 
+def field_label(name):
+    labels = {
+        "summary": "Resume",
+        "key_takeaways": "Hvad lærte vi",
+        "next_steps": "Næste skridt / frister",
+        "raw_text": "Referattekst",
+        "ai_summary": "AI-resume",
+        "raw_summary": "Kilderesume",
+        "content": "Indhold",
+        "implication": "Mulig betydning",
+        "follow_up": "Opfølgning",
+        "significance": "Betydning",
+        "current_relevance": "Nuværende relevans",
+        "note": "Note",
+        "briefing_text": "Briefing",
+        "user_notes": "Egne noter",
+    }
+    return labels.get(name, name.replace("_", " ").capitalize())
+
 def severity_index(value, options):
     return options.index(value) if value in options else 0
 
@@ -207,7 +226,14 @@ def add_timeline_rows(items, df, item_type, date_col, title_col, body_cols, meta
     for _, row in df.iterrows():
         date_value = row.get(date_col, "") or row.get("created_at", "")
         title = row.get(title_col, "") or item_type
-        body_parts = [str(row.get(col, "")).strip() for col in body_cols if row.get(col, "")]
+        details = []
+        body_parts = []
+        for col in body_cols:
+            value = str(row.get(col, "") or "").strip()
+            if value:
+                label = field_label(col)
+                details.append((label, value))
+                body_parts.append(value)
         meta_parts = [str(row.get(col, "")).strip() for col in meta_cols if row.get(col, "")]
         items.append({
             "sort_date": str(date_value or ""),
@@ -215,6 +241,7 @@ def add_timeline_rows(items, df, item_type, date_col, title_col, body_cols, meta
             "type": item_type,
             "title": title,
             "body": "\n\n".join(body_parts),
+            "details": details,
             "meta": " · ".join(meta_parts),
         })
 
@@ -222,12 +249,12 @@ def company_timeline(company_id):
     items = []
     add_timeline_rows(
         items,
-        q("""SELECT meeting_date, meeting_time, location, title, meeting_type, participants, summary, key_takeaways, next_steps, uploaded_filename, created_at
+        q("""SELECT meeting_date, meeting_time, location, title, meeting_type, participants, summary, key_takeaways, next_steps, raw_text, uploaded_filename, created_at
              FROM meetings WHERE company_id=?""", (company_id,)),
         "Møde",
         "meeting_date",
         "title",
-        ["summary", "key_takeaways", "next_steps"],
+        ["summary", "key_takeaways", "next_steps", "raw_text"],
         ["meeting_time", "location", "meeting_type", "uploaded_filename"],
     )
     add_timeline_rows(
@@ -584,6 +611,17 @@ elif page == "Virksomheder":
                                 st.caption(item["meta"])
                             if item["body"]:
                                 st.write(short(item["body"], 900))
+                                if len(item["body"]) > 900:
+                                    with st.expander("Vis hele indholdet"):
+                                        for label, value in item["details"]:
+                                            st.markdown(f"**{label}**")
+                                            st.text_area(
+                                                label,
+                                                value,
+                                                height=260,
+                                                key=f"timeline_detail_{company_id}_{item['type']}_{item['sort_date']}_{label}_{abs(hash(value))}",
+                                                disabled=True,
+                                            )
                 else:
                     st.info("Ingen tidslinjeelementer endnu.")
 
