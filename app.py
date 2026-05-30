@@ -461,6 +461,16 @@ elif page == "Virksomheder":
                             if m["summary"]: st.write(m["summary"])
                             if m["key_takeaways"]: st.write(f"**Hvad lærte vi:** {m['key_takeaways']}")
                             if m["next_steps"]: st.write(f"**Næste skridt / frister:** {m['next_steps']}")
+                            if "uploaded_filename" in meetings.columns and m["uploaded_filename"]:
+                                st.caption(f"Uploadet referat: {m['uploaded_filename']}")
+                            if "raw_text" in meetings.columns and m["raw_text"]:
+                                with st.expander("Vis referattekst"):
+                                    st.text_area(
+                                        "Referattekst",
+                                        m["raw_text"],
+                                        height=260,
+                                        key=f"meeting_raw_text_{int(m['id'])}",
+                                    )
                             with st.expander("Redigér / slet møde"):
                                 with st.form(f"edit_meeting_{int(m['id'])}"):
                                     title = st.text_input("Titel", m["title"])
@@ -718,12 +728,39 @@ elif page == "Virksomheder":
 
 elif page == "Møder & referater":
     st.subheader("Møder & referater")
-    df = q("""SELECT m.meeting_date AS dato, m.meeting_time AS tid, m.location AS sted, c.name AS virksomhed, m.title AS titel,
-                     m.meeting_type AS type, m.participants AS deltagere, m.key_takeaways AS læring, m.next_steps AS næste_skridt
+    df = q("""SELECT m.id, m.meeting_date AS dato, m.meeting_time AS tid, m.location AS sted, c.name AS virksomhed, m.title AS titel,
+                     m.meeting_type AS type, m.participants AS deltagere, m.summary AS resume,
+                     m.key_takeaways AS læring, m.next_steps AS næste_skridt,
+                     m.uploaded_filename AS filnavn, m.raw_text AS referattekst
               FROM meetings m LEFT JOIN companies c ON c.id=m.company_id
               ORDER BY m.meeting_date DESC, m.meeting_time DESC, m.created_at DESC""")
     if len(df):
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        table_df = df.drop(columns=["id", "referattekst"])
+        st.dataframe(table_df, use_container_width=True, hide_index=True)
+        with st.expander("Åbn referat / mødedetaljer", expanded=False):
+            options = []
+            for _, row in df.iterrows():
+                label = f"{display_date(row['dato'])} - {row['virksomhed']} - {row['titel']}"
+                options.append((label, int(row["id"])))
+            selected_label = st.selectbox("Vælg møde", [label for label, _ in options])
+            selected_id = dict(options)[selected_label]
+            selected = df[df["id"] == selected_id].iloc[0]
+            if selected["filnavn"]:
+                st.caption(f"Uploadet fil: {selected['filnavn']}")
+            if selected["resume"]:
+                st.markdown("**Resume**")
+                st.write(selected["resume"])
+            if selected["læring"]:
+                st.markdown("**Hvad lærte vi**")
+                st.write(selected["læring"])
+            if selected["næste_skridt"]:
+                st.markdown("**Næste skridt / frister**")
+                st.write(selected["næste_skridt"])
+            if selected["referattekst"]:
+                st.markdown("**Referattekst**")
+                st.text_area("Referattekst", selected["referattekst"], height=360, key=f"meeting_page_raw_text_{selected_id}")
+            else:
+                st.info("Der er ikke gemt referattekst på dette møde.")
     else:
         st.info("Ingen møder endnu.")
 
