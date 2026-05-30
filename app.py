@@ -590,6 +590,30 @@ if page == "Dashboard":
     c1, c2 = st.columns(2)
     with c1:
         st.subheader(f"Dashboard · {display_date(date.today().isoformat())}")
+        with st.expander("Tilføj opfølgning / lead", expanded=False):
+            with st.form(f"dashboard_add_followup_{st.session_state.get('dashboard_followup_form_version',0)}", clear_on_submit=True):
+                company_labels = ["Ingen aktør"] + companies["name"].tolist() if len(companies) else ["Ingen aktør"]
+                selected_company = st.selectbox("Aktør", company_labels)
+                title = st.text_input("Titel", value="")
+                person = st.text_input("Person", value="")
+                due_date = st.text_input("Dato/timing", value="")
+                priority = st.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=1)
+                status = st.selectbox("Status", ["Ny", "Planlagt", "I gang", "Afventer"], index=0)
+                description = st.text_area("Beskrivelse", value="", height=120)
+                if st.form_submit_button("Gem opfølgning"):
+                    selected_company_id = None
+                    if selected_company != "Ingen aktør" and len(companies):
+                        selected_company_id = int(companies[companies["name"] == selected_company]["id"].iloc[0])
+                    run(
+                        """INSERT INTO followups
+                           (company_id, title, description, person, due_date, priority, status, source_type, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (selected_company_id, title, description, person, due_date, priority, status, "Dashboard", now_iso(), now_iso()),
+                    )
+                    st.session_state["dashboard_followup_form_version"] = st.session_state.get("dashboard_followup_form_version",0) + 1
+                    st.success("Opfølgning gemt.")
+                    st.rerun()
+
         st.markdown("### Næste handlinger / leads")
         if len(followups):
             today_iso = date.today().isoformat()
