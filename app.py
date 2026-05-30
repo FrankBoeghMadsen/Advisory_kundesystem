@@ -35,25 +35,31 @@ def ai_briefing_text(company_name, context_text):
             prompt = f"""
 Du er senior strategisk rådgiver for Frank Bøgh Madsen Advisory.
 
-Lav en konkret, kortfattet og professionel mødeforberedelse på dansk til et kommende møde med virksomheden: {company_name}.
+Lav en konkret, kortfattet og handlingsorienteret mødeforberedelse på dansk til et kommende møde med aktøren: {company_name}.
+
+Formålet er ikke at skrive en lang analyse, men at give Frank et praktisk brief, som kan bruges lige før og under mødet.
 
 Brug kun oplysninger fra konteksten nedenfor.
 Du må gerne:
-- sammenholde oplysninger
-- identificere mønstre
-- foreslå relevante spørgsmål
+- sammenholde oplysninger på tværs af møder, noter, signaler, observationer, sager og åbne opfølgninger
+- identificere mønstre og uafklarede forhold
+- foreslå konkrete spørgsmål
 - pege på forhold der bør verificeres
-- pege på mulige regulatoriske eller strategiske risici/muligheder
+- pege på mulige regulatoriske, strategiske eller kommercielle muligheder
 
-Du må IKKE opfinde fakta.
+Du må IKKE opfinde fakta. Hvis grundlaget er tyndt, så sig det tydeligt og foreslå hvad Frank bør afklare i mødet.
+
+Skriv i et professionelt, direkte sprog. Brug korte afsnit og punktform. Prioritér det vigtigste først.
 
 Struktur:
-# Situationsbillede
-# Centrale opfølgningspunkter
-# Observationer der bør verificeres
-# Mulige spørgsmål til mødet
-# Potentielle rådgivningsmuligheder
-# Frister og næste skridt
+# 1. Kort situationsbillede
+# 2. Hvad Frank bør opnå med mødet
+# 3. Åbne opfølgninger og aftaler
+# 4. Spørgsmål Frank bør stille
+# 5. Forhold der bør verificeres
+# 6. Mulig rådgivnings- eller kommerciel vinkel
+# 7. Anbefalet mødetaktik
+# 8. Efter mødet: næste handlinger
 
 Kontekst:
 {context_text[:18000]}
@@ -81,7 +87,7 @@ Kontekst:
                     messages=[
                         {
                             "role": "system",
-                            "content": "Du er en præcis dansk advisory-assistent. Brug kun den givne kontekst."
+                            "content": "Du er en præcis dansk advisory-assistent. Brug kun den givne kontekst, og markér tydeligt når noget bør afklares."
                         },
                         {"role": "user", "content": prompt}
                     ],
@@ -136,25 +142,43 @@ setx OPENAI_API_KEY "din_nøgle"
 def local_briefing_text(company_name, context_text):
     return f"""# Mødebriefing: {company_name}
 
-## Situationsbillede
+## 1. Kort situationsbillede
 - Gennemgå seneste møder, observationer, signaler og historiske sager.
 - Fokusér især på oplysninger markeret som ikke verificeret eller bør verificeres.
 
-## Centrale opfølgningspunkter
+## 2. Hvad Frank bør opnå med mødet
+- Afklare om relationen, behovet eller kundeforløbet har ændret sig siden sidst.
+- Få bekræftet konkrete næste skridt, timing og relevante beslutningstagere.
+
+## 3. Åbne opfølgninger og aftaler
 - Hvad blev aftalt sidst?
 - Er der åbne opfølgningspunkter eller frister?
 - Er der personer eller relationer, der bør aktiveres?
 
-## Mulige spørgsmål til mødet
+## 4. Spørgsmål Frank bør stille
 - Hvilke kvalitetsmæssige eller regulatoriske forhold fylder mest lige nu?
 - Hvad er ændret siden sidst i organisation, QA/RA/GMP eller ledelse?
 - Er der konkrete projekter eller frister hvor ekstern sparring kan skabe værdi?
 
-## Potentielle rådgivningsmuligheder
+## 5. Forhold der bør verificeres
+- Hvilke oplysninger er fortsat antagelser eller baseret på ældre møder?
+- Er der nye risici, deadlines eller beslutninger, som bør dokumenteres?
+
+## 6. Mulig rådgivnings- eller kommerciel vinkel
 - Strategisk sparring om myndighedsdialog
 - Gennemgang af regulatoriske problemstillinger
 - Forberedelse til inspektioner eller opfølgning
 - Overblik over risici og næste skridt
+
+## 7. Anbefalet mødetaktik
+- Start med relationen og seneste udvikling.
+- Gå derefter til konkrete åbne punkter og behov.
+- Slut med tydelige næste skridt og aftalt opfølgning.
+
+## 8. Efter mødet: næste handlinger
+- Gem referat eller hovedpointer på profilen.
+- Opret opfølgning/lead med dato, person og næste handling.
+- Opdater briefing eller noter, hvis der kom ny strategisk viden.
 """
 
 def ai_meeting_followup_text(company_name, meeting_title, meeting_text, context_text):
