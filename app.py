@@ -930,6 +930,40 @@ elif page == "Virksomheder":
                                                 (company_id, note_title, note_text, now_iso(), now_iso()),
                                             )
                                             st.success("AI-opfølgning gemt som note.")
+                                    with st.form(f"save_followup_lead_{int(m['id'])}"):
+                                        lead_title = st.text_input(
+                                            "Lead/opfølgningstitel",
+                                            f"Opfølgning - {m['title']}",
+                                        )
+                                        lead_description = st.text_area(
+                                            "Beskrivelse til dashboard",
+                                            st.session_state[followup_key],
+                                            height=180,
+                                        )
+                                        lead_person = st.text_input("Person", value="")
+                                        lead_due_date = st.text_input("Dato/timing", value="")
+                                        lead_priority = st.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=1)
+                                        lead_status = st.selectbox("Status", ["Ny", "Planlagt", "I gang", "Afventer"], index=0)
+                                        if st.form_submit_button("Gem som opfølgning / lead"):
+                                            run(
+                                                """INSERT INTO followups
+                                                   (company_id, title, description, person, due_date, priority, status, source_type, source_id, created_at, updated_at)
+                                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                                (
+                                                    company_id,
+                                                    lead_title,
+                                                    lead_description,
+                                                    lead_person,
+                                                    lead_due_date,
+                                                    lead_priority,
+                                                    lead_status,
+                                                    "AI-opfølgning",
+                                                    int(m["id"]),
+                                                    now_iso(),
+                                                    now_iso(),
+                                                ),
+                                            )
+                                            st.success("AI-opfølgning gemt som opfølgning/lead på dashboardet.")
                             with st.expander("Redigér / slet møde"):
                                 with st.form(f"edit_meeting_{int(m['id'])}"):
                                     title = st.text_input("Titel", m["title"])
