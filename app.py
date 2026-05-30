@@ -196,7 +196,6 @@ def set_page(name):
 
 def set_company(company_id):
     st.session_state["selected_company_id"] = int(company_id)
-    st.session_state["company_view_mode"] = "Profil"
     st.session_state["force_profile_view"] = True
 
 
