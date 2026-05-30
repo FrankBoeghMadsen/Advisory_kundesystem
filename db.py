@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     company_id INTEGER,
     name TEXT NOT NULL,
     role TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
     email TEXT DEFAULT '',
     linkedin TEXT DEFAULT '',
     notes TEXT DEFAULT '',
@@ -284,6 +285,8 @@ def migrate_db(conn):
     add_column_if_missing(conn, "signals", "review_status", "TEXT DEFAULT 'Ny'")
     add_column_if_missing(conn, "signals", "review_note", "TEXT DEFAULT ''")
     conn.execute("UPDATE signals SET review_status='Ny' WHERE review_status IS NULL OR review_status=''")
+
+    add_column_if_missing(conn, "contacts", "phone", "TEXT DEFAULT ''")
 
     add_column_if_missing(conn, "notes", "title", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "notes", "updated_at", "TEXT DEFAULT ''")

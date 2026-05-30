@@ -354,7 +354,7 @@ def sync_actor_sources(actor_name, website, linkedin, aliases="", actor_status="
             """INSERT INTO sources
                (name, source_type, url, keywords, active, status, priority, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (f"{actor_name} - {label}", source_type, clean_url, keywords, active, status, "Middel", now_iso()),
+            (f"{actor_name} - {label}", source_type, clean_url, keywords, active, status, "Høj" if label == "LinkedIn" else "Middel", now_iso()),
         )
 
 def sync_existing_actor_sources(companies_df):
@@ -690,6 +690,7 @@ if page == "Dashboard":
                          LEFT JOIN companies c ON s.url=c.linkedin
                          WHERE s.source_type='reference'
                            AND (LOWER(s.name) LIKE '%linkedin%' OR LOWER(s.url) LIKE '%linkedin%')
+                           AND COALESCE(s.priority, 'Middel')='Høj'
                          ORDER BY s.name
                          LIMIT 12""")
     overdue_count = int((followups["dashboard_group"] == "Forfaldne").sum()) if len(followups) else 0
@@ -826,6 +827,7 @@ if page == "Dashboard":
             st.caption("Ingen kommende møder registreret.")
 
         st.subheader("LinkedIn-referencekilder")
+        st.caption("Kun referencekilder med prioritet Høj vises her. Skift prioritet under Kilder for at vælge til/fra.")
         if len(linkedin_refs):
             for _, src in linkedin_refs.iterrows():
                 with st.container(border=True):
@@ -1413,6 +1415,8 @@ elif page == "Virksomheder":
                             col2.caption(c["role"] or "")
                             if c["email"]:
                                 col1.caption(c["email"])
+                            if c["phone"]:
+                                col1.caption(c["phone"])
                             if c["linkedin"]:
                                 col2.markdown(f"[LinkedIn]({c['linkedin']})")
                             if c["notes"]:
@@ -1421,12 +1425,13 @@ elif page == "Virksomheder":
                                 with st.form(f"edit_contact_{int(c['id'])}"):
                                     name = st.text_input("Navn", c["name"])
                                     role = st.text_input("Rolle", c["role"] or "")
+                                    phone = st.text_input("Telefon", c["phone"] or "")
                                     email = st.text_input("Email", c["email"] or "")
                                     linkedin = st.text_input("LinkedIn", c["linkedin"] or "")
                                     notes = st.text_area("Noter", c["notes"] or "", height=90)
                                     if st.form_submit_button("Gem"):
-                                        run("UPDATE contacts SET name=?, role=?, email=?, linkedin=?, notes=? WHERE id=?",
-                                            (name, role, email, linkedin, notes, int(c["id"]))); st.rerun()
+                                        run("UPDATE contacts SET name=?, role=?, phone=?, email=?, linkedin=?, notes=? WHERE id=?",
+                                            (name, role, phone, email, linkedin, notes, int(c["id"]))); st.rerun()
                                     if st.form_submit_button("Slet"):
                                         run("DELETE FROM contacts WHERE id=?", (int(c["id"]),)); st.rerun()
                 else:
@@ -1435,12 +1440,13 @@ elif page == "Virksomheder":
                     with st.form(f"add_contact_{company_id}_{st.session_state.get('contact_form_version',0)}", clear_on_submit=True):
                         name = st.text_input("Navn", value="")
                         role = st.text_input("Rolle", value="")
+                        phone = st.text_input("Telefon", value="")
                         email = st.text_input("Email", value="")
                         linkedin = st.text_input("LinkedIn", value="")
                         notes = st.text_area("Noter", value="", height=90)
                         if st.form_submit_button("Gem kontakt"):
-                            run("INSERT INTO contacts (company_id, name, role, email, linkedin, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                (company_id, name, role, email, linkedin, notes, now_iso()))
+                            run("INSERT INTO contacts (company_id, name, role, phone, email, linkedin, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                                (company_id, name, role, phone, email, linkedin, notes, now_iso()))
                             st.session_state["contact_form_version"] = st.session_state.get("contact_form_version",0) + 1
                             st.rerun()
 
