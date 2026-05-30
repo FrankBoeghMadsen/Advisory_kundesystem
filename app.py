@@ -455,6 +455,16 @@ def company_timeline(company_id):
         ["briefing_text", "user_notes"],
         ["linked_meeting", "version", "status"],
     )
+    add_timeline_rows(
+        items,
+        q("""SELECT created_at, due_date, title, description, person, priority, status, source_type
+             FROM followups WHERE company_id=?""", (company_id,)),
+        "Opfølgning",
+        "due_date",
+        "title",
+        ["description"],
+        ["person", "priority", "status", "source_type"],
+    )
     return sorted(items, key=lambda item: item["sort_date"] or "", reverse=True)
 
 def set_page(name):
@@ -541,16 +551,45 @@ if page == "Dashboard":
     companies = q("SELECT * FROM companies")
     meetings = q("SELECT m.*, c.name AS company FROM meetings m LEFT JOIN companies c ON c.id=m.company_id ORDER BY m.meeting_date ASC, m.meeting_time ASC")
     observations = q("SELECT * FROM observations")
+    followups = q("""SELECT f.*, c.name AS company
+                     FROM followups f LEFT JOIN companies c ON c.id=f.company_id
+                     WHERE COALESCE(f.status, 'Ny') NOT IN ('Lukket', 'Arkiveret')
+                     ORDER BY
+                        CASE f.priority WHEN 'Høj' THEN 1 WHEN 'Middel' THEN 2 ELSE 3 END,
+                        CASE WHEN f.due_date='' OR f.due_date IS NULL THEN 1 ELSE 0 END,
+                        f.due_date ASC,
+                        f.created_at DESC""")
     cols = st.columns(5)
     cols[0].metric("Nye signaler", int((signals["review_status"] == "Ny").sum()) if len(signals) else 0)
     cols[1].metric("Til vurdering", int((signals["review_status"] == "Til vurdering").sum()) if len(signals) else 0)
     cols[2].metric("Virksomheder", len(companies))
     cols[3].metric("Møder", len(meetings))
-    cols[4].metric("Observationer", len(observations))
+    cols[4].metric("Opfølgninger", len(followups))
 
     c1, c2 = st.columns(2)
     with c1:
         st.subheader(f"Dashboard · {display_date(date.today().isoformat())}")
+        st.markdown("### Næste handlinger / leads")
+        if len(followups):
+            for _, f in followups.head(8).iterrows():
+                with st.container(border=True):
+                    due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
+                    company = f["company"] or "Ingen virksomhed"
+                    person = f" · {f['person']}" if f["person"] else ""
+                    st.markdown(f"**{f['title']}**")
+                    st.caption(f"{company}{person} · {due} · {f['priority']} · {f['status']}")
+                    if f["description"]:
+                        st.write(short(f["description"], 220))
+                    a, b = st.columns(2)
+                    if a.button("I gang", key=f"dash_follow_progress_{int(f['id'])}"):
+                        run("UPDATE followups SET status=?, updated_at=? WHERE id=?", ("I gang", now_iso(), int(f["id"])))
+                        st.rerun()
+                    if b.button("Luk", key=f"dash_follow_close_{int(f['id'])}"):
+                        run("UPDATE followups SET status=?, updated_at=? WHERE id=?", ("Lukket", now_iso(), int(f["id"])))
+                        st.rerun()
+        else:
+            st.success("Ingen åbne opfølgninger.")
+
         st.markdown("### Signalpåmindelse")
         new_count = int((signals["review_status"] == "Ny").sum()) if len(signals) else 0
         review_count = int((signals["review_status"] == "Til vurdering").sum()) if len(signals) else 0
@@ -702,10 +741,12 @@ elif page == "Virksomheder":
             note_n = count_for("notes", company_id)
             mem_n = count_for("intelligence_memory", company_id)
             brief_n = count_for("briefings", company_id)
-            timeline_n = sig_n + meet_n + obs_n + case_n + note_n + mem_n + brief_n
+            follow_n = count_for("followups", company_id)
+            timeline_n = sig_n + meet_n + obs_n + case_n + note_n + mem_n + brief_n + follow_n
 
             section_counts = {
                 "Tidslinje": timeline_n,
+                "Opfølgning": follow_n,
                 "Signaler": sig_n,
                 "Møder": meet_n,
                 "Observationer": obs_n,
@@ -715,7 +756,7 @@ elif page == "Virksomheder":
                 "Videnbank": mem_n,
                 "Briefing": brief_n,
             }
-            sections = ["Tidslinje", "Signaler", "Møder", "Observationer", "Historik / Sager", "Kontakter", "Noter", "Videnbank", "Briefing"]
+            sections = ["Tidslinje", "Opfølgning", "Signaler", "Møder", "Observationer", "Historik / Sager", "Kontakter", "Noter", "Videnbank", "Briefing"]
             section_key = f"profile_section_{company_id}"
             if st.session_state.get(section_key) not in sections:
                 st.session_state[section_key] = "Tidslinje"
@@ -766,6 +807,58 @@ elif page == "Virksomheder":
                                             )
                 else:
                     st.info("Ingen tidslinjeelementer endnu.")
+
+            elif section_base == "Opfølgning":
+                st.markdown("### Opfølgninger / leads")
+                followups = q("SELECT * FROM followups WHERE company_id=? ORDER BY due_date ASC, created_at DESC", (company_id,))
+                if len(followups):
+                    for _, f in followups.iterrows():
+                        with st.container(border=True):
+                            due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
+                            st.markdown(f"**{f['title']}**")
+                            meta = [due, f["priority"], f["status"], f["source_type"]]
+                            if f["person"]:
+                                meta.insert(1, f["person"])
+                            st.caption(" · ".join([m for m in meta if m]))
+                            if f["description"]:
+                                st.write(f["description"])
+                            with st.expander("Redigér / slet opfølgning"):
+                                with st.form(f"edit_followup_{int(f['id'])}"):
+                                    title = st.text_input("Titel", f["title"])
+                                    description = st.text_area("Beskrivelse", f["description"] or "", height=120)
+                                    person = st.text_input("Person", f["person"] or "")
+                                    due_date = st.text_input("Dato/timing", f["due_date"] or "")
+                                    priority = st.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=severity_index(f["priority"], ["Lav", "Middel", "Høj"]))
+                                    status = st.selectbox("Status", ["Ny", "Planlagt", "I gang", "Afventer", "Lukket", "Arkiveret"], index=severity_index(f["status"], ["Ny", "Planlagt", "I gang", "Afventer", "Lukket", "Arkiveret"]))
+                                    a, b = st.columns(2)
+                                    if a.form_submit_button("Gem ændringer"):
+                                        run(
+                                            "UPDATE followups SET title=?, description=?, person=?, due_date=?, priority=?, status=?, updated_at=? WHERE id=?",
+                                            (title, description, person, due_date, priority, status, now_iso(), int(f["id"])),
+                                        )
+                                        st.rerun()
+                                    if b.form_submit_button("Slet opfølgning"):
+                                        run("DELETE FROM followups WHERE id=?", (int(f["id"]),))
+                                        st.rerun()
+                else:
+                    st.info("Ingen opfølgninger endnu.")
+                with st.expander("Tilføj opfølgning / lead"):
+                    with st.form(f"add_followup_{company_id}_{st.session_state.get('followup_form_version',0)}", clear_on_submit=True):
+                        title = st.text_input("Titel", value="")
+                        description = st.text_area("Beskrivelse", value="", height=120)
+                        person = st.text_input("Person", value="")
+                        due_date = st.text_input("Dato/timing", value="")
+                        priority = st.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=1)
+                        status = st.selectbox("Status", ["Ny", "Planlagt", "I gang", "Afventer"], index=0)
+                        if st.form_submit_button("Gem opfølgning"):
+                            run(
+                                """INSERT INTO followups
+                                   (company_id, title, description, person, due_date, priority, status, source_type, created_at, updated_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (company_id, title, description, person, due_date, priority, status, "Manuel", now_iso(), now_iso()),
+                            )
+                            st.session_state["followup_form_version"] = st.session_state.get("followup_form_version",0) + 1
+                            st.rerun()
 
             elif section_base == "Signaler":
                 sigs = q("SELECT id, collected_at, trigger_type, score, review_status, title FROM signals WHERE company_id=? ORDER BY collected_at DESC", (company_id,))

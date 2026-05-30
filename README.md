@@ -38,6 +38,12 @@ Uden nøgle virker appen stadig med regelbaseret scoring.
 ## Bemærk
 Denne MVP bruger kun konfigurerbare offentlige feeds/web-kilder. LinkedIn er ikke automatiseret.
 
+## Begrebet "virksomhed"
+
+I den nuværende datamodel hedder den centrale aktør stadig `virksomhed`. I praksis kan den også bruges til brancheforeninger, vigtige relationer, rådgivere, kaffemødekontakter eller andre aktører, som Frank Advisory ønsker at følge over tid.
+
+En senere version bør overveje at omdøbe dette til `aktør`, `relation` eller `kundeemne`, så systemet ikke kun er bundet til klassiske life science-virksomheder.
+
 ## Nyt i v1.1
 - Virksomheder kan sættes til Aktiv, Pauset eller Arkiveret
 - Overvågningen medtager kun virksomheder med status Aktiv

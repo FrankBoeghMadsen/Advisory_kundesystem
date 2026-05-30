@@ -207,6 +207,22 @@ CREATE TABLE IF NOT EXISTS briefings (
     FOREIGN KEY(company_id) REFERENCES companies(id),
     FOREIGN KEY(meeting_id) REFERENCES meetings(id)
 );
+
+CREATE TABLE IF NOT EXISTS followups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    person TEXT DEFAULT '',
+    due_date TEXT DEFAULT '',
+    priority TEXT DEFAULT 'Middel',
+    status TEXT DEFAULT 'Ny',
+    source_type TEXT DEFAULT 'Manuel',
+    source_id INTEGER,
+    created_at TEXT NOT NULL,
+    updated_at TEXT DEFAULT '',
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+);
 """
 
 def ensure_data_dir():
@@ -276,6 +292,16 @@ def migrate_db(conn):
     add_column_if_missing(conn, "briefings", "version", "INTEGER DEFAULT 1")
     add_column_if_missing(conn, "briefings", "status", "TEXT DEFAULT 'Aktiv'")
     add_column_if_missing(conn, "briefings", "updated_at", "TEXT DEFAULT ''")
+
+    add_column_if_missing(conn, "followups", "company_id", "INTEGER")
+    add_column_if_missing(conn, "followups", "description", "TEXT DEFAULT ''")
+    add_column_if_missing(conn, "followups", "person", "TEXT DEFAULT ''")
+    add_column_if_missing(conn, "followups", "due_date", "TEXT DEFAULT ''")
+    add_column_if_missing(conn, "followups", "priority", "TEXT DEFAULT 'Middel'")
+    add_column_if_missing(conn, "followups", "status", "TEXT DEFAULT 'Ny'")
+    add_column_if_missing(conn, "followups", "source_type", "TEXT DEFAULT 'Manuel'")
+    add_column_if_missing(conn, "followups", "source_id", "INTEGER")
+    add_column_if_missing(conn, "followups", "updated_at", "TEXT DEFAULT ''")
 
 def seed_if_empty(conn):
     cur = conn.execute("SELECT COUNT(*) AS n FROM companies")
