@@ -7,8 +7,14 @@ from monitor import run_monitor
 
 import os
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 def ai_briefing_text(company_name, context_text):
-    """AI briefing via OpenAI Responses API with local fallback."""
+    """AI briefing via OpenAI with local fallback."""
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key:
         try:
@@ -43,19 +49,36 @@ Kontekst:
 {context_text[:18000]}
 """
 
-            response = client.responses.create(
-                model=model,
-                input=prompt,
-                temperature=0.2
-            )
-
             text = ""
-            if hasattr(response, "output_text"):
-                text = response.output_text
+            if hasattr(client, "responses"):
+                response = client.responses.create(
+                    model=model,
+                    input=prompt,
+                    temperature=0.2
+                )
 
-            if not text:
+                if hasattr(response, "output_text"):
+                    text = response.output_text
+
+                if not text:
+                    try:
+                        text = response.output[0].content[0].text
+                    except Exception:
+                        text = ""
+            else:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Du er en præcis dansk advisory-assistent. Brug kun den givne kontekst."
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.2
+                )
                 try:
-                    text = response.output[0].content[0].text
+                    text = response.choices[0].message.content or ""
                 except Exception:
                     text = ""
 
