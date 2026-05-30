@@ -851,7 +851,7 @@ elif page == "Virksomheder":
                             created = q("SELECT id FROM companies WHERE name=?", (clean_name,))
                             if len(created):
                                 st.session_state["selected_company_id"] = int(created["id"].iloc[0])
-                                st.session_state["company_view_mode"] = "Profil"
+                                st.session_state["force_profile_view"] = True
                             st.session_state["add_actor_form_version"] = st.session_state.get("add_actor_form_version",0) + 1
                             st.success("Aktør oprettet.")
                             st.rerun()
