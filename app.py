@@ -191,6 +191,15 @@ def count_for(table, company_id):
     except Exception:
         return 0
 
+def latest_meeting_id(company_id):
+    df = q(
+        "SELECT id FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC, created_at DESC LIMIT 1",
+        (company_id,),
+    )
+    if len(df):
+        return int(df["id"].iloc[0])
+    return None
+
 def set_page(name):
     st.session_state["page"] = name
 
@@ -750,6 +759,39 @@ elif page == "Virksomheder":
             elif section_base == "Briefing":
                 st.markdown("### Briefing til kommende møde")
                 st.markdown(f"**Virksomhed:** {row['name']}")
+                saved_briefings = q(
+                    "SELECT * FROM briefings WHERE company_id=? ORDER BY created_at DESC, id DESC",
+                    (company_id,),
+                )
+                if len(saved_briefings):
+                    st.markdown("### Gemte briefings")
+                    for _, b in saved_briefings.iterrows():
+                        with st.container(border=True):
+                            st.markdown(f"**{b['title']}**")
+                            st.caption(f"Oprettet: {display_date(b['created_at'])} · version {int(b['version'] or 1)} · {b['status']}")
+                            st.markdown(b["briefing_text"])
+                            if b["user_notes"]:
+                                st.markdown("**Egne noter**")
+                                st.write(b["user_notes"])
+                            with st.expander("Redigér / slet briefing"):
+                                with st.form(f"edit_briefing_{int(b['id'])}"):
+                                    title = st.text_input("Titel", b["title"])
+                                    briefing_text = st.text_area("Briefing", b["briefing_text"], height=260)
+                                    user_notes = st.text_area("Egne noter", b["user_notes"] or "", height=120)
+                                    status = st.selectbox("Status", ["Aktiv", "Arkiveret"], index=severity_index(b["status"], ["Aktiv", "Arkiveret"]))
+                                    a, c = st.columns(2)
+                                    if a.form_submit_button("Gem ændringer"):
+                                        run(
+                                            "UPDATE briefings SET title=?, briefing_text=?, user_notes=?, status=?, updated_at=? WHERE id=?",
+                                            (title, briefing_text, user_notes, status, now_iso(), int(b["id"])),
+                                        )
+                                        st.rerun()
+                                    if c.form_submit_button("Slet briefing"):
+                                        run("DELETE FROM briefings WHERE id=?", (int(b["id"]),))
+                                        st.rerun()
+                else:
+                    st.info("Ingen gemte briefings endnu. Brug Briefing-generatoren og gem et udkast.")
+
                 recent_meetings = q("SELECT meeting_date, meeting_time, location, title, key_takeaways, next_steps FROM meetings WHERE company_id=? ORDER BY meeting_date DESC, meeting_time DESC, created_at DESC LIMIT 5", (company_id,))
                 recent_obs = q("SELECT observation_date, title, observation_type, confidence, verification_status FROM observations WHERE company_id=? ORDER BY observation_date DESC, created_at DESC LIMIT 8", (company_id,))
                 if len(recent_meetings):
@@ -846,9 +888,36 @@ elif page == "Briefing":
         with c2:
             st.markdown("### Udkast til mødeforberedelse")
             if st.button("Generér briefing"):
-                st.session_state["generated_briefing"] = ai_briefing_text(selected, context)
-            if "generated_briefing" in st.session_state:
-                st.markdown(st.session_state["generated_briefing"])
+                st.session_state[f"generated_briefing_{cid}"] = ai_briefing_text(selected, context)
+            generated_key = f"generated_briefing_{cid}"
+            if generated_key in st.session_state:
+                briefing_text = st.session_state[generated_key]
+                st.markdown(briefing_text)
+                with st.form(f"save_briefing_{cid}"):
+                    default_title = f"Briefing - {selected} - {datetime.now().strftime('%Y-%m-%d')}"
+                    title = st.text_input("Titel", default_title)
+                    user_notes = st.text_area("Egne noter", value="", height=120)
+                    if st.form_submit_button("Gem briefing på virksomheden"):
+                        existing = q("SELECT MAX(version) AS max_version FROM briefings WHERE company_id=?", (cid,))
+                        max_version = int(existing["max_version"].iloc[0] or 0) if len(existing) else 0
+                        run(
+                            """INSERT INTO briefings
+                               (company_id, meeting_id, title, briefing_text, user_notes, source_context, version, status, created_at, updated_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (
+                                cid,
+                                latest_meeting_id(cid),
+                                title,
+                                briefing_text,
+                                user_notes,
+                                context,
+                                max_version + 1,
+                                "Aktiv",
+                                now_iso(),
+                                now_iso(),
+                            ),
+                        )
+                        st.success("Briefing gemt på virksomhedsprofilen.")
             else:
                 st.caption("Tryk på knappen for at danne et udkast. Hvis OpenAI API-nøgle ikke er sat, laves en lokal struktureret briefing.")
 

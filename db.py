@@ -191,6 +191,22 @@ CREATE TABLE IF NOT EXISTS uploaded_documents (
     FOREIGN KEY(company_id) REFERENCES companies(id),
     FOREIGN KEY(meeting_id) REFERENCES meetings(id)
 );
+
+CREATE TABLE IF NOT EXISTS briefings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    meeting_id INTEGER,
+    title TEXT NOT NULL,
+    briefing_text TEXT NOT NULL,
+    user_notes TEXT DEFAULT '',
+    source_context TEXT DEFAULT '',
+    version INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'Aktiv',
+    created_at TEXT NOT NULL,
+    updated_at TEXT DEFAULT '',
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(meeting_id) REFERENCES meetings(id)
+);
 """
 
 def ensure_data_dir():
@@ -253,6 +269,13 @@ def migrate_db(conn):
 
     add_column_if_missing(conn, "meetings", "meeting_time", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "meetings", "location", "TEXT DEFAULT ''")
+
+    add_column_if_missing(conn, "briefings", "meeting_id", "INTEGER")
+    add_column_if_missing(conn, "briefings", "user_notes", "TEXT DEFAULT ''")
+    add_column_if_missing(conn, "briefings", "source_context", "TEXT DEFAULT ''")
+    add_column_if_missing(conn, "briefings", "version", "INTEGER DEFAULT 1")
+    add_column_if_missing(conn, "briefings", "status", "TEXT DEFAULT 'Aktiv'")
+    add_column_if_missing(conn, "briefings", "updated_at", "TEXT DEFAULT ''")
 
 def seed_if_empty(conn):
     cur = conn.execute("SELECT COUNT(*) AS n FROM companies")
