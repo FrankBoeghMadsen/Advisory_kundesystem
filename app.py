@@ -785,9 +785,6 @@ if page == "Dashboard":
         else:
             st.caption("Ingen kommende møder registreret.")
 
-    st.subheader("Mødeforberedelse")
-    st.caption("Brug kommende møder som anledning til at samle tidligere aftaler, observationer og åbne opfølgningspunkter.")
-
 elif page == "Signalindbakke":
     st.subheader("Signalindbakke")
     df = q("""SELECT s.id, s.collected_at, c.name AS company, s.trigger_type, s.score,
