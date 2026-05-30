@@ -822,6 +822,42 @@ elif page == "Virksomheder":
     mode = st.radio("Visning", ["Oversigt", "Profil"], horizontal=True, key="company_view_mode")
 
     if mode == "Oversigt":
+        with st.expander("Opret ny aktør", expanded=False):
+            with st.form(f"add_actor_form_{st.session_state.get('add_actor_form_version',0)}", clear_on_submit=True):
+                a1, a2, a3 = st.columns([2, 1.4, 1])
+                name = a1.text_input("Navn")
+                actor_type = a2.selectbox("Aktørtype", ACTOR_TYPES, index=0)
+                priority = a3.selectbox("Prioritet", ["Lav","Middel","Høj"], index=1)
+                category = st.text_area("Kategori / kort beskrivelse", height=80)
+                b1, b2 = st.columns(2)
+                country = b1.text_input("Land", value="Danmark")
+                status = b2.selectbox("Status", ["Aktiv","Pauset","Arkiveret"], index=0)
+                c1, c2 = st.columns(2)
+                website = c1.text_input("Website", value="")
+                linkedin = c2.text_input("LinkedIn", value="")
+                aliases = st.text_input("Aliaser / søgeord", value="")
+                if st.form_submit_button("Opret aktør"):
+                    clean_name = name.strip()
+                    if not clean_name:
+                        st.warning("Navn skal udfyldes.")
+                    else:
+                        try:
+                            run(
+                                """INSERT INTO companies
+                                   (name, actor_type, category, country, priority, website, linkedin, status, aliases, created_at)
+                                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (clean_name, actor_type, category, country, priority, website, linkedin, status, aliases, now_iso()),
+                            )
+                            created = q("SELECT id FROM companies WHERE name=?", (clean_name,))
+                            if len(created):
+                                st.session_state["selected_company_id"] = int(created["id"].iloc[0])
+                                st.session_state["company_view_mode"] = "Profil"
+                            st.session_state["add_actor_form_version"] = st.session_state.get("add_actor_form_version",0) + 1
+                            st.success("Aktør oprettet.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Aktøren kunne ikke oprettes. Tjek om navnet allerede findes. Fejl: {e}")
+
         f1, f2, f3, f4 = st.columns([1,1,1.4,2])
         status_filter = f1.multiselect("Status", ["Aktiv","Pauset","Arkiveret"], default=["Aktiv","Pauset"])
         priority_filter = f2.multiselect("Prioritet", ["Lav","Middel","Høj"], default=["Lav","Middel","Høj"])
