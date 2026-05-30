@@ -200,6 +200,94 @@ def latest_meeting_id(company_id):
         return int(df["id"].iloc[0])
     return None
 
+def add_timeline_rows(items, df, item_type, date_col, title_col, body_cols, meta_cols=None):
+    meta_cols = meta_cols or []
+    if not len(df):
+        return
+    for _, row in df.iterrows():
+        date_value = row.get(date_col, "") or row.get("created_at", "")
+        title = row.get(title_col, "") or item_type
+        body_parts = [str(row.get(col, "")).strip() for col in body_cols if row.get(col, "")]
+        meta_parts = [str(row.get(col, "")).strip() for col in meta_cols if row.get(col, "")]
+        items.append({
+            "sort_date": str(date_value or ""),
+            "date": date_value,
+            "type": item_type,
+            "title": title,
+            "body": "\n\n".join(body_parts),
+            "meta": " · ".join(meta_parts),
+        })
+
+def company_timeline(company_id):
+    items = []
+    add_timeline_rows(
+        items,
+        q("""SELECT meeting_date, meeting_time, location, title, meeting_type, participants, summary, key_takeaways, next_steps, uploaded_filename, created_at
+             FROM meetings WHERE company_id=?""", (company_id,)),
+        "Møde",
+        "meeting_date",
+        "title",
+        ["summary", "key_takeaways", "next_steps"],
+        ["meeting_time", "location", "meeting_type", "uploaded_filename"],
+    )
+    add_timeline_rows(
+        items,
+        q("""SELECT collected_at, title, trigger_type, score, review_status, ai_summary, raw_summary
+             FROM signals WHERE company_id=?""", (company_id,)),
+        "Signal",
+        "collected_at",
+        "title",
+        ["ai_summary", "raw_summary"],
+        ["trigger_type", "score", "review_status"],
+    )
+    add_timeline_rows(
+        items,
+        q("""SELECT observation_date, title, observation_type, source_type, confidence, verification_status, content, implication, follow_up, created_at
+             FROM observations WHERE company_id=?""", (company_id,)),
+        "Observation",
+        "observation_date",
+        "title",
+        ["content", "implication", "follow_up"],
+        ["observation_type", "source_type", "confidence", "verification_status"],
+    )
+    add_timeline_rows(
+        items,
+        q("""SELECT period_start, title, case_type, severity, relevance, status, summary, significance, current_relevance, created_at
+             FROM company_cases WHERE company_id=?""", (company_id,)),
+        "Sag",
+        "period_start",
+        "title",
+        ["summary", "significance", "current_relevance"],
+        ["case_type", "severity", "relevance", "status"],
+    )
+    add_timeline_rows(
+        items,
+        q("SELECT created_at, title, note FROM notes WHERE company_id=?", (company_id,)),
+        "Note",
+        "created_at",
+        "title",
+        ["note"],
+    )
+    add_timeline_rows(
+        items,
+        q("SELECT created_at, memory_type, title, content, confidence FROM intelligence_memory WHERE company_id=?", (company_id,)),
+        "Videnbank",
+        "created_at",
+        "title",
+        ["content"],
+        ["memory_type", "confidence"],
+    )
+    add_timeline_rows(
+        items,
+        q("SELECT created_at, title, briefing_text, user_notes, version, status FROM briefings WHERE company_id=?", (company_id,)),
+        "Briefing",
+        "created_at",
+        "title",
+        ["briefing_text", "user_notes"],
+        ["version", "status"],
+    )
+    return sorted(items, key=lambda item: item["sort_date"] or "", reverse=True)
+
 def set_page(name):
     st.session_state["page"] = name
 
@@ -444,8 +532,11 @@ elif page == "Virksomheder":
             contact_n = count_for("contacts", company_id)
             note_n = count_for("notes", company_id)
             mem_n = count_for("intelligence_memory", company_id)
+            brief_n = count_for("briefings", company_id)
+            timeline_n = sig_n + meet_n + obs_n + case_n + note_n + mem_n + brief_n
 
             section_counts = {
+                "Tidslinje": timeline_n,
                 "Signaler": sig_n,
                 "Møder": meet_n,
                 "Observationer": obs_n,
@@ -453,11 +544,12 @@ elif page == "Virksomheder":
                 "Kontakter": contact_n,
                 "Noter": note_n,
                 "Videnbank": mem_n,
+                "Briefing": brief_n,
             }
-            sections = ["Signaler", "Møder", "Observationer", "Historik / Sager", "Kontakter", "Noter", "Videnbank", "Briefing"]
+            sections = ["Tidslinje", "Signaler", "Møder", "Observationer", "Historik / Sager", "Kontakter", "Noter", "Videnbank", "Briefing"]
             section_key = f"profile_section_{company_id}"
             if st.session_state.get(section_key) not in sections:
-                st.session_state[section_key] = "Signaler"
+                st.session_state[section_key] = "Tidslinje"
             section_base = st.radio(
                 "Profilsektion",
                 sections,
@@ -480,7 +572,22 @@ elif page == "Virksomheder":
                         run("UPDATE companies SET name=?, category=?, country=?, priority=?, status=?, aliases=?, website=?, linkedin=? WHERE id=?",
                             (name, category, country, priority, status, aliases, website, linkedin, company_id)); st.rerun()
 
-            if section_base == "Signaler":
+            if section_base == "Tidslinje":
+                st.markdown("### Samlet virksomhedstidslinje")
+                timeline = company_timeline(company_id)
+                if timeline:
+                    for item in timeline:
+                        with st.container(border=True):
+                            date_text = display_date(item["date"]) or "Ukendt dato"
+                            st.markdown(f"**{date_text} · {item['type']} · {item['title']}**")
+                            if item["meta"]:
+                                st.caption(item["meta"])
+                            if item["body"]:
+                                st.write(short(item["body"], 900))
+                else:
+                    st.info("Ingen tidslinjeelementer endnu.")
+
+            elif section_base == "Signaler":
                 sigs = q("SELECT id, collected_at, trigger_type, score, review_status, title FROM signals WHERE company_id=? ORDER BY collected_at DESC", (company_id,))
                 if len(sigs):
                     for _, s in sigs.iterrows():
