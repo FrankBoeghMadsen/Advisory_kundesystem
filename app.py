@@ -668,7 +668,7 @@ div.stButton > button { min-height: 2.35rem; font-size: 0.95rem; }
 </style>
 """, unsafe_allow_html=True)
 
-page_options = ["Dashboard", "Opgaver", "Signalindbakke", "Virksomheder", "Briefing", "Kilder", "Triggerregler"]
+page_options = ["Dashboard", "Opgaver", "Møder", "Signalindbakke", "Virksomheder", "Briefing", "Kilder", "Triggerregler"]
 if "page" not in st.session_state:
     st.session_state["page"] = "Dashboard"
 if st.session_state["page"] not in page_options:
@@ -1766,41 +1766,136 @@ elif page == "Virksomheder":
                 st.markdown("- Relevante regulatoriske/kvalitetsmæssige temaer")
                 st.markdown("- Eventuelle frister, næste skridt og mulige rådgivningsbehov")
 
-elif page == "Møder & referater":
-    st.subheader("Møder & referater")
-    df = q("""SELECT m.id, m.meeting_date AS dato, m.meeting_time AS tid, m.location AS sted, c.name AS virksomhed, m.title AS titel,
+elif page in ("Møder", "Møder & referater"):
+    st.subheader("Møder")
+    today_iso = date.today().isoformat()
+    st.caption("Samlet overblik over kommende og tidligere møder på tværs af aktører.")
+
+    companies = q("SELECT id, name FROM companies ORDER BY name")
+    company_names = companies["name"].tolist() if len(companies) else []
+    company_lookup = {row["name"]: int(row["id"]) for _, row in companies.iterrows()} if len(companies) else {}
+
+    with st.expander("Opret møde", expanded=False):
+        if not len(companies):
+            st.info("Opret først en aktør under Virksomheder.")
+        else:
+            with st.form(f"meetings_add_{st.session_state.get('meetings_form_version',0)}", clear_on_submit=True):
+                a, b, c = st.columns([1.3, 1, 1])
+                selected_company = a.selectbox("Aktør", company_names)
+                meeting_date = b.text_input("Dato", today_iso)
+                meeting_time = c.text_input("Tid", "")
+                d, e = st.columns([1.5, 1])
+                title = d.text_input("Titel", "Møde")
+                meeting_type = e.selectbox("Type", ["Kaffemøde", "Kundemøde", "Opfølgning", "Statusmøde", "Referat", "Andet"], index=0)
+                location = st.text_input("Sted", "")
+                participants = st.text_input("Deltagere", "")
+                summary = st.text_area("Resume", "", height=110)
+                next_steps = st.text_area("Næste skridt / frister", "", height=90)
+                if st.form_submit_button("Gem møde"):
+                    run(
+                        """INSERT INTO meetings
+                           (company_id, meeting_date, meeting_time, location, title, meeting_type, participants, relation_strength, confidentiality, summary, next_steps, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            company_lookup[selected_company],
+                            meeting_date,
+                            meeting_time,
+                            location,
+                            title,
+                            meeting_type,
+                            participants,
+                            "Middel",
+                            "Intern",
+                            summary,
+                            next_steps,
+                            now_iso(),
+                            now_iso(),
+                        ),
+                    )
+                    st.session_state["meetings_form_version"] = st.session_state.get("meetings_form_version",0) + 1
+                    st.success("Møde gemt.")
+                    st.rerun()
+
+    df = q("""SELECT m.id, m.company_id, m.meeting_date AS dato, m.meeting_time AS tid, m.location AS sted, c.name AS virksomhed, m.title AS titel,
                      m.meeting_type AS type, m.participants AS deltagere, m.summary AS resume,
                      m.key_takeaways AS læring, m.next_steps AS næste_skridt,
                      m.uploaded_filename AS filnavn, m.raw_text AS referattekst
               FROM meetings m LEFT JOIN companies c ON c.id=m.company_id
               ORDER BY m.meeting_date DESC, m.meeting_time DESC, m.created_at DESC""")
     if len(df):
-        table_df = df.drop(columns=["id", "referattekst"])
+        upcoming_count = int((df["dato"].fillna("") >= today_iso).sum())
+        minutes_count = int((df["referattekst"].fillna("") != "").sum())
+        metric_cols = st.columns(4)
+        metric_cols[0].metric("Møder", len(df))
+        metric_cols[1].metric("Kommende", upcoming_count)
+        metric_cols[2].metric("Med referat", minutes_count)
+        metric_cols[3].metric("Aktører", int(df["virksomhed"].nunique()))
+
+        f1, f2, f3 = st.columns([1.1, 1, 1.4])
+        timing_filter = f1.selectbox("Periode", ["Alle", "Kommende", "Tidligere"], index=0)
+        actor_filter = f2.selectbox("Aktør", ["Alle"] + company_names)
+        search_text = f3.text_input("Søg i titel, resume, næste skridt eller deltagere", "")
+
+        shown = df.copy()
+        if timing_filter == "Kommende":
+            shown = shown[shown["dato"].fillna("") >= today_iso]
+            shown = shown.sort_values(["dato", "tid"], ascending=[True, True])
+        elif timing_filter == "Tidligere":
+            shown = shown[shown["dato"].fillna("") < today_iso]
+        if actor_filter != "Alle":
+            shown = shown[shown["virksomhed"].fillna("") == actor_filter]
+        if search_text.strip():
+            needle = search_text.strip().lower()
+            searchable = (
+                shown["titel"].fillna("")
+                + " "
+                + shown["resume"].fillna("")
+                + " "
+                + shown["næste_skridt"].fillna("")
+                + " "
+                + shown["deltagere"].fillna("")
+            ).str.lower()
+            shown = shown[searchable.str.contains(needle, regex=False)]
+
+        table_df = shown.drop(columns=["id", "company_id", "referattekst"])
+        st.markdown(f"### Viste møder ({len(shown)})")
         st.dataframe(table_df, use_container_width=True, hide_index=True)
         with st.expander("Åbn referat / mødedetaljer", expanded=False):
             options = []
-            for _, row in df.iterrows():
+            for _, row in shown.iterrows():
                 label = f"{display_date(row['dato'])} - {row['virksomhed']} - {row['titel']}"
                 options.append((label, int(row["id"])))
-            selected_label = st.selectbox("Vælg møde", [label for label, _ in options])
-            selected_id = dict(options)[selected_label]
-            selected = df[df["id"] == selected_id].iloc[0]
-            if selected["filnavn"]:
-                st.caption(f"Uploadet fil: {selected['filnavn']}")
-            if selected["resume"]:
-                st.markdown("**Resume**")
-                st.write(selected["resume"])
-            if selected["læring"]:
-                st.markdown("**Hvad lærte vi**")
-                st.write(selected["læring"])
-            if selected["næste_skridt"]:
-                st.markdown("**Næste skridt / frister**")
-                st.write(selected["næste_skridt"])
-            if selected["referattekst"]:
-                st.markdown("**Referattekst**")
-                st.text_area("Referattekst", selected["referattekst"], height=360, key=f"meeting_page_raw_text_{selected_id}")
+            if options:
+                selected_label = st.selectbox("Vælg møde", [label for label, _ in options])
+                selected_id = dict(options)[selected_label]
+                selected = shown[shown["id"] == selected_id].iloc[0]
+                a, b = st.columns(2)
+                if a.button("Åbn profil", key=f"meetings_detail_profile_{selected_id}", disabled=not has_db_id(selected["company_id"])):
+                    open_company_section(int(selected["company_id"]), "Møder")
+                    st.rerun()
+                if b.button("Lav briefing", key=f"meetings_detail_briefing_{selected_id}", disabled=not has_db_id(selected["company_id"])):
+                    st.session_state["selected_company_id"] = int(selected["company_id"])
+                    st.session_state["selected_briefing_meeting_id"] = selected_id
+                    set_page("Briefing")
+                    st.rerun()
+                if selected["filnavn"]:
+                    st.caption(f"Uploadet fil: {selected['filnavn']}")
+                if selected["resume"]:
+                    st.markdown("**Resume**")
+                    st.write(selected["resume"])
+                if selected["læring"]:
+                    st.markdown("**Hvad lærte vi**")
+                    st.write(selected["læring"])
+                if selected["næste_skridt"]:
+                    st.markdown("**Næste skridt / frister**")
+                    st.write(selected["næste_skridt"])
+                if selected["referattekst"]:
+                    st.markdown("**Referattekst**")
+                    st.text_area("Referattekst", selected["referattekst"], height=360, key=f"meeting_page_raw_text_{selected_id}")
+                else:
+                    st.info("Der er ikke gemt referattekst på dette møde.")
             else:
-                st.info("Der er ikke gemt referattekst på dette møde.")
+                st.info("Ingen møder matcher filtrene.")
     else:
         st.info("Ingen møder endnu.")
 
