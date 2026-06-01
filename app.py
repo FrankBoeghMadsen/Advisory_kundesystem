@@ -342,6 +342,21 @@ def short(text, n=900):
 def has_db_id(value):
     return str(value or "").strip().lower() not in ("", "none", "nan")
 
+def clean_text_value(value):
+    text = str(value or "").strip()
+    return "" if text.lower() == "nan" else text
+
+def merge_text_values(primary_value, secondary_value, secondary_label):
+    primary_text = clean_text_value(primary_value)
+    secondary_text = clean_text_value(secondary_value)
+    if not secondary_text:
+        return primary_text
+    if not primary_text:
+        return secondary_text
+    if secondary_text in primary_text:
+        return primary_text
+    return f"{primary_text}\n\n---\n{secondary_label}\n{secondary_text}"
+
 def sync_actor_sources(actor_name, website, linkedin, aliases="", actor_status="Aktiv"):
     keywords = "|".join([part for part in [actor_name, aliases] if part])
     source_status = "Aktiv" if actor_status == "Aktiv" else "Pauset"
@@ -1830,6 +1845,90 @@ elif page in ("Møder", "Møder & referater"):
         metric_cols[1].metric("Kommende", upcoming_count)
         metric_cols[2].metric("Med referat", minutes_count)
         metric_cols[3].metric("Aktører", int(df["virksomhed"].nunique()))
+
+        duplicate_groups = []
+        for (company_id_value, date_value), group in df.groupby(["company_id", "dato"], dropna=False):
+            if has_db_id(company_id_value) and clean_text_value(date_value) and len(group) > 1:
+                first_row = group.iloc[0]
+                duplicate_groups.append(
+                    (
+                        f"{display_date(date_value)} - {first_row['virksomhed']} ({len(group)} mødeposter)",
+                        int(company_id_value),
+                        clean_text_value(date_value),
+                    )
+                )
+
+        if duplicate_groups:
+            with st.expander("Mulige møder der kan samles", expanded=False):
+                st.caption("Viser mødeposter med samme aktør og dato. Brug funktionen til at samle forberedelsesnoter og referat i én mødepost.")
+                duplicate_label = st.selectbox("Mulig dublet", [label for label, _, _ in duplicate_groups])
+                _, duplicate_company_id, duplicate_date = next(item for item in duplicate_groups if item[0] == duplicate_label)
+                duplicate_rows = df[
+                    (df["company_id"] == duplicate_company_id)
+                    & (df["dato"].fillna("").astype(str) == duplicate_date)
+                ].copy()
+                meeting_options_for_merge = []
+                for _, row in duplicate_rows.iterrows():
+                    markers = []
+                    if clean_text_value(row["referattekst"]):
+                        markers.append("referat")
+                    if clean_text_value(row["resume"]):
+                        markers.append("resume")
+                    if clean_text_value(row["næste_skridt"]):
+                        markers.append("næste skridt")
+                    marker_text = f" · {', '.join(markers)}" if markers else ""
+                    meeting_options_for_merge.append((f"#{int(row['id'])} · {row['titel'] or 'Møde'}{marker_text}", int(row["id"])))
+
+                with st.form("merge_meetings_form"):
+                    keep_label = st.selectbox("Behold som hovedmøde", [label for label, _ in meeting_options_for_merge])
+                    merge_label = st.selectbox("Flyt indhold fra og slet", [label for label, _ in meeting_options_for_merge])
+                    merge_submitted = st.form_submit_button("Saml mødeposter")
+                    if merge_submitted:
+                        keep_id = dict(meeting_options_for_merge)[keep_label]
+                        merge_id = dict(meeting_options_for_merge)[merge_label]
+                        if keep_id == merge_id:
+                            st.warning("Vælg to forskellige mødeposter.")
+                        else:
+                            keep_row = duplicate_rows[duplicate_rows["id"] == keep_id].iloc[0]
+                            merge_row = duplicate_rows[duplicate_rows["id"] == merge_id].iloc[0]
+                            merge_note = f"Tilføjet fra mødepost #{merge_id}: {merge_row['titel'] or 'Møde'}"
+                            merged_title = clean_text_value(keep_row["titel"]) or clean_text_value(merge_row["titel"]) or "Møde"
+                            merged_type = clean_text_value(keep_row["type"]) or clean_text_value(merge_row["type"])
+                            merged_participants = merge_text_values(keep_row["deltagere"], merge_row["deltagere"], merge_note)
+                            merged_summary = merge_text_values(keep_row["resume"], merge_row["resume"], merge_note)
+                            merged_takeaways = merge_text_values(keep_row["læring"], merge_row["læring"], merge_note)
+                            merged_next_steps = merge_text_values(keep_row["næste_skridt"], merge_row["næste_skridt"], merge_note)
+                            merged_raw_text = merge_text_values(keep_row["referattekst"], merge_row["referattekst"], merge_note)
+                            merged_filename = clean_text_value(keep_row["filnavn"]) or clean_text_value(merge_row["filnavn"])
+                            merged_location = clean_text_value(keep_row["sted"]) or clean_text_value(merge_row["sted"])
+                            merged_time = clean_text_value(keep_row["tid"]) or clean_text_value(merge_row["tid"])
+
+                            run(
+                                """UPDATE meetings
+                                   SET title=?, meeting_type=?, meeting_time=?, location=?, participants=?,
+                                       summary=?, key_takeaways=?, next_steps=?, raw_text=?, uploaded_filename=?, updated_at=?
+                                   WHERE id=?""",
+                                (
+                                    merged_title,
+                                    merged_type,
+                                    merged_time,
+                                    merged_location,
+                                    merged_participants,
+                                    merged_summary,
+                                    merged_takeaways,
+                                    merged_next_steps,
+                                    merged_raw_text,
+                                    merged_filename,
+                                    now_iso(),
+                                    keep_id,
+                                ),
+                            )
+                            run("UPDATE uploaded_documents SET meeting_id=? WHERE meeting_id=?", (keep_id, merge_id))
+                            run("UPDATE briefings SET meeting_id=?, updated_at=? WHERE meeting_id=?", (keep_id, now_iso(), merge_id))
+                            run("UPDATE observations SET related_meeting_id=?, updated_at=? WHERE related_meeting_id=?", (keep_id, now_iso(), merge_id))
+                            run("DELETE FROM meetings WHERE id=?", (merge_id,))
+                            st.success("Mødeposterne er samlet.")
+                            st.rerun()
 
         f1, f2, f3 = st.columns([1.1, 1, 1.4])
         timing_filter = f1.selectbox("Periode", ["Alle", "Kommende", "Tidligere"], index=0)
