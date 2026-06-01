@@ -576,6 +576,10 @@ def open_company_section(company_id, section):
     st.session_state["force_profile_view"] = True
     st.session_state["page"] = "Virksomheder"
 
+def open_followup(company_id, followup_id):
+    st.session_state["highlight_followup_id"] = int(followup_id)
+    open_company_section(company_id, "Opfølgning")
+
 def followup_group(row, today_iso):
     due = str(row.get("due_date", "") or "").strip()
     if not due:
@@ -769,7 +773,7 @@ if page == "Dashboard":
                                 st.write(short(f["description"], 220))
                             a, b, c = st.columns([1, 1.35, 1])
                             if a.button("Åbn profil", key=f"dash_follow_open_{int(f['id'])}", disabled=not f["company_id"]):
-                                open_company_section(int(f["company_id"]), "Opfølgning")
+                                open_followup(int(f["company_id"]), int(f["id"]))
                                 st.rerun()
                             selected_status = b.selectbox(
                                 "Status",
@@ -795,7 +799,7 @@ if page == "Dashboard":
                         st.caption(f"{f['followup_type']} · {due}")
                         st.write(short(f["title"], 80))
                         if st.button("Åbn", key=f"pipeline_open_{int(f['id'])}", disabled=not f["company_id"]):
-                            open_company_section(int(f["company_id"]), "Opfølgning")
+                            open_followup(int(f["company_id"]), int(f["id"]))
                             st.rerun()
 
         st.markdown("### Signalpåmindelse")
@@ -1116,11 +1120,17 @@ elif page == "Virksomheder":
 
             elif section_base == "Opfølgning":
                 st.markdown("### Opfølgninger / leads / opgaver")
+                highlighted_followup_id = st.session_state.pop("highlight_followup_id", None)
                 followups = q("SELECT * FROM followups WHERE company_id=? ORDER BY due_date ASC, created_at DESC", (company_id,))
                 if len(followups):
+                    if highlighted_followup_id and highlighted_followup_id in followups["id"].tolist():
+                        followups["_highlight_sort"] = followups["id"].apply(lambda value: 0 if int(value) == int(highlighted_followup_id) else 1)
+                        followups = followups.sort_values(["_highlight_sort", "due_date", "created_at"], ascending=[True, True, False])
                     for _, f in followups.iterrows():
                         with st.container(border=True):
                             due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
+                            if highlighted_followup_id and int(f["id"]) == int(highlighted_followup_id):
+                                st.info("Valgt fra dashboard")
                             st.markdown(f"**{f['title']}**")
                             meta = [due, f["followup_type"], f["priority"], f["status"], f["source_type"]]
                             if f["person"]:
