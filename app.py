@@ -32,6 +32,8 @@ FOLLOWUP_TYPES = [
     "Intern opgave",
 ]
 
+FOLLOWUP_STATUSES = ["Ny", "Planlagt", "I gang", "Afventer", "Lukket", "Arkiveret"]
+
 def ai_briefing_text(company_name, context_text):
     """AI briefing via OpenAI with local fallback."""
     api_key = os.getenv("OPENAI_API_KEY")
@@ -765,15 +767,18 @@ if page == "Dashboard":
                                 st.write(f"**Næste handling:** {f['next_action']}")
                             if f["description"]:
                                 st.write(short(f["description"], 220))
-                            a, b, c = st.columns(3)
+                            a, b, c = st.columns([1, 1.35, 1])
                             if a.button("Åbn profil", key=f"dash_follow_open_{int(f['id'])}", disabled=not f["company_id"]):
                                 open_company_section(int(f["company_id"]), "Opfølgning")
                                 st.rerun()
-                            if b.button("I gang", key=f"dash_follow_progress_{int(f['id'])}"):
-                                run("UPDATE followups SET status=?, updated_at=? WHERE id=?", ("I gang", now_iso(), int(f["id"])))
-                                st.rerun()
-                            if c.button("Luk", key=f"dash_follow_close_{int(f['id'])}"):
-                                run("UPDATE followups SET status=?, updated_at=? WHERE id=?", ("Lukket", now_iso(), int(f["id"])))
+                            selected_status = b.selectbox(
+                                "Status",
+                                FOLLOWUP_STATUSES,
+                                index=severity_index(f["status"] or "Ny", FOLLOWUP_STATUSES),
+                                key=f"dash_follow_status_{int(f['id'])}",
+                            )
+                            if c.button("Gem status", key=f"dash_follow_save_status_{int(f['id'])}"):
+                                run("UPDATE followups SET status=?, updated_at=? WHERE id=?", (selected_status, now_iso(), int(f["id"])))
                                 st.rerun()
         else:
             st.success("Ingen åbne opfølgninger.")
