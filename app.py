@@ -596,6 +596,27 @@ def followup_group(row, today_iso):
             pass
     return "Planlagt senere"
 
+def followup_due_label(due_value, today_iso=None):
+    due = str(due_value or "").strip()
+    if not due:
+        return "Ingen dato"
+    shown = display_date(due)
+    if len(due) >= 10 and due[4:5] == "-" and due[7:8] == "-":
+        try:
+            today_date = date.fromisoformat(today_iso or date.today().isoformat())
+            due_date = date.fromisoformat(due[:10])
+            days = (due_date - today_date).days
+            if days < 0:
+                return f"{shown} · {abs(days)} dage for sent"
+            if days == 0:
+                return f"{shown} · i dag"
+            if days == 1:
+                return f"{shown} · i morgen"
+            return f"{shown} · om {days} dage"
+        except ValueError:
+            pass
+    return shown
+
 def briefing_context(company_id):
     parts = []
     company = q("SELECT * FROM companies WHERE id=?", (company_id,))
@@ -700,6 +721,7 @@ if page == "Dashboard":
                          LIMIT 12""")
     overdue_count = int((followups["dashboard_group"] == "Forfaldne").sum()) if len(followups) else 0
     next30_count = int((followups["dashboard_group"] == "Næste 30 dage").sum()) if len(followups) else 0
+    undated_count = int((followups["dashboard_group"] == "Uden dato").sum()) if len(followups) else 0
     new_signal_count = int((signals["review_status"] == "Ny").sum()) if len(signals) else 0
     cols = st.columns(5)
     cols[0].metric("Forfaldne", overdue_count)
@@ -727,6 +749,8 @@ if page == "Dashboard":
             st.caption(next_meeting["title"] or "Møde")
         if new_signal_count:
             st.caption(f"{new_signal_count} nye signaler bør gennemgås i Signalindbakken.")
+        if undated_count:
+            st.caption(f"{undated_count} åbne opgaver/leads mangler dato.")
 
         with st.expander("Tilføj opfølgning / lead", expanded=False):
             with st.form(f"dashboard_add_followup_{st.session_state.get('dashboard_followup_form_version',0)}", clear_on_submit=True):
@@ -762,7 +786,7 @@ if page == "Dashboard":
                     st.markdown(f"**{group_name} ({len(group_df)})**")
                     for _, f in group_df.head(6).iterrows():
                         with st.container(border=True):
-                            due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
+                            due = followup_due_label(f["due_date"], today_iso)
                             company = f["company"] or "Ingen virksomhed"
                             person = f" · {f['person']}" if f["person"] else ""
                             st.markdown(f"**{f['title']}**")
@@ -795,7 +819,7 @@ if page == "Dashboard":
                 with status_cols[idx]:
                     st.metric(status_name, len(status_df))
                     for _, f in status_df.head(3).iterrows():
-                        due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
+                        due = followup_due_label(f["due_date"], today_iso)
                         st.caption(f"{f['followup_type']} · {due}")
                         st.write(short(f["title"], 80))
                         if st.button("Åbn", key=f"pipeline_open_{int(f['id'])}", disabled=not f["company_id"]):
@@ -1128,7 +1152,7 @@ elif page == "Virksomheder":
                         followups = followups.sort_values(["_highlight_sort", "due_date", "created_at"], ascending=[True, True, False])
                     for _, f in followups.iterrows():
                         with st.container(border=True):
-                            due = display_date(f["due_date"]) if f["due_date"] else "Ingen dato"
+                            due = followup_due_label(f["due_date"])
                             if highlighted_followup_id and int(f["id"]) == int(highlighted_followup_id):
                                 st.info("Valgt fra dashboard")
                             st.markdown(f"**{f['title']}**")
