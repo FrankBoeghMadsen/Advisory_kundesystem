@@ -54,6 +54,20 @@ Databasekontrol og en isoleret gendannelsestest kan køres med:
 
 Se [ETAPE_1_STABILISERING.md](ETAPE_1_STABILISERING.md) for migrationer, testresultater og rollback.
 
+## Programstruktur
+
+Brugerfladen er opdelt uden ændring af navigationen:
+
+- `app.py`: opstart, fælles layout og navigation.
+- `views/`: én renderfunktion pr. eksisterende visning.
+- `services/`: AI, aktør-/briefinglogik og lokal dokumentlagring.
+- `repositories.py`: fælles gateway til databaseforespørgsler og skrivehandlinger.
+- `ui/`: formatering og navigationstilstand.
+- `app_config.py`: fælles navne, sidemenuer og statuslister.
+- `db.py`: skema, migrationer, backup og lavniveau-databaseadgang.
+
+Se [ETAPE_2_MODULOPDELING.md](ETAPE_2_MODULOPDELING.md) for flyttede kodeområder, regressionstest og kendte afgrænsninger.
+
 ## Bemærk
 Denne MVP bruger kun konfigurerbare offentlige feeds/web-kilder. LinkedIn er ikke automatiseret.
 

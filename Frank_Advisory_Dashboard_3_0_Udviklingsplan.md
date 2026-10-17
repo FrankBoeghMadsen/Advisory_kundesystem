@@ -476,7 +476,7 @@ Faste genveje til:
 
 ### Etape 1 – Stabilt fundament og sikker database
 
-**Status 17. oktober 2026:** Implementeret på udviklingsgrenen `codex/dashboard-3-foundation` og afventer godkendelse. Se `ETAPE_1_STABILISERING.md` for den tekniske aflevering og testresultaterne. Etape 2–7 er ikke påbegyndt.
+**Status 17. oktober 2026:** Godkendt og afsluttet. Se `ETAPE_1_STABILISERING.md` for den tekniske aflevering og testresultaterne.
 
 **Formål:** Reducere regressionsrisiko, før forretningsmodellen udvides.
 
@@ -500,6 +500,8 @@ Faste genveje til:
 
 ### Etape 2 – Modulopdeling uden ændret funktionalitet
 
+**Status 17. oktober 2026:** Implementeret på udviklingsgrenen `codex/dashboard-3-foundation` og afventer godkendelse. Se `ETAPE_2_MODULOPDELING.md`. Senere etaper er ikke påbegyndt.
+
 **Formål:** Gøre fremtidige ændringer mindre risikable.
 
 **Funktioner:**
@@ -516,6 +518,18 @@ Faste genveje til:
 **Risici:** Streamlit state og widgetnøgler kan ændre adfærd ved flytning.
 
 **Test:** Smoke-test af alle sider; opret/redigér/slet på en testdatabase; regressionstest af profilnavigation, briefing og mødeupload.
+
+### Foreløbig rækkefølge efter etape 2
+
+Den oprindelige nummerering nedenfor bevares som reference, men den foreløbigt ønskede prioritering er nu:
+
+1. Muligheder, tilbud og kundeopgaver.
+2. Dashboard 3.0.
+3. Segmentering og import af Excel-arket.
+4. Målrettet Intelligence Monitor.
+5. Yderligere AI-funktioner og eventuel sikker fjernadgang.
+
+Rækkefølgen er ikke en godkendelse af implementering. Hver efterfølgende etape kræver særskilt godkendelse.
 
 ### Etape 3 – Aktør- og segmenteringsgrundlag
 

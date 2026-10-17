@@ -100,9 +100,29 @@ class DatabaseFoundationTests(unittest.TestCase):
                     "INSERT INTO companies (name, actor_type, created_at) VALUES (?, ?, ?)",
                     ("Testaktør", "Brancheforening", now),
                 ).lastrowid
+                contact_id = conn.execute(
+                    """INSERT INTO contacts
+                       (company_id, name, role, phone, email, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (actor_id, "Testkontakt", "Direktør", "12345678", "test@example.com", now),
+                ).lastrowid
                 meeting_id = conn.execute(
-                    "INSERT INTO meetings (company_id, title, meeting_date, created_at) VALUES (?, ?, ?, ?)",
-                    (actor_id, "Testmøde", "2026-10-17", now),
+                    """INSERT INTO meetings
+                       (company_id, title, meeting_date, raw_text, uploaded_filename, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (actor_id, "Testmøde", "2026-10-17", "Testreferat", "referat.docx", now),
+                ).lastrowid
+                document_id = conn.execute(
+                    """INSERT INTO uploaded_documents
+                       (company_id, meeting_id, original_filename, stored_path, extracted_text, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (actor_id, meeting_id, "referat.docx", "test/referat.docx", "Testreferat", now),
+                ).lastrowid
+                briefing_id = conn.execute(
+                    """INSERT INTO briefings
+                       (company_id, meeting_id, title, briefing_text, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (actor_id, meeting_id, "Testbriefing", "Lokal briefing", now),
                 ).lastrowid
                 followup_id = conn.execute(
                     """INSERT INTO followups
@@ -120,6 +140,24 @@ class DatabaseFoundationTests(unittest.TestCase):
                 ).fetchone()[0]
                 self.assertEqual(meeting_company, actor_id)
                 self.assertEqual(followup_company, actor_id)
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT company_id FROM contacts WHERE id=?", (contact_id,)
+                    ).fetchone()[0],
+                    actor_id,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT meeting_id FROM uploaded_documents WHERE id=?", (document_id,)
+                    ).fetchone()[0],
+                    meeting_id,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT meeting_id FROM briefings WHERE id=?", (briefing_id,)
+                    ).fetchone()[0],
+                    meeting_id,
+                )
                 self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
 
 
