@@ -545,11 +545,44 @@ def migration_004_business_module(conn):
     )
 
 
+def migration_005_agreement_details(conn):
+    for table in ("proposals", "engagements"):
+        add_column_if_missing(conn, table, "max_hours", "NUMERIC")
+        add_column_if_missing(conn, table, "fee_cap_ex_vat", "NUMERIC")
+        add_column_if_missing(conn, table, "included_hours", "NUMERIC")
+    add_column_if_missing(conn, "engagements", "actual_hours", "NUMERIC")
+    add_column_if_missing(conn, "engagements", "reuse_potential", "TEXT DEFAULT 'Ikke vurderet'")
+    add_column_if_missing(conn, "engagements", "reuse_notes", "TEXT DEFAULT ''")
+    add_column_if_missing(conn, "engagements", "original_agreement", "TEXT DEFAULT ''")
+    conn.execute("""CREATE TABLE proposal_changes (
+        id INTEGER PRIMARY KEY, proposal_id INTEGER NOT NULL REFERENCES proposals(id),
+        changed_at TEXT NOT NULL, reason TEXT NOT NULL,
+        previous_values TEXT NOT NULL, new_values TEXT NOT NULL)""")
+    conn.execute("""CREATE TABLE engagement_amendments (
+        id INTEGER PRIMARY KEY, engagement_id INTEGER NOT NULL REFERENCES engagements(id),
+        amendment_date TEXT DEFAULT '', description TEXT NOT NULL,
+        previous_fee NUMERIC, new_fee NUMERIC, acceptance_reference TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # Preserve the pre-upgrade agreement, including direct engagements without proposals.
+    import json
+    for row in conn.execute("SELECT * FROM engagements").fetchall():
+        conn.execute("UPDATE engagements SET original_agreement=? WHERE id=?",
+                     (json.dumps(dict(row), ensure_ascii=False), row["id"]))
+    conn.execute("""CREATE TRIGGER protect_accepted_proposal
+        BEFORE UPDATE ON proposals WHEN OLD.status='Accepteret'
+        AND NOT EXISTS (
+            SELECT 1 FROM proposal_changes h
+            WHERE h.proposal_id=OLD.id AND h.changed_at=NEW.updated_at
+              AND h.changed_at!=COALESCE(OLD.updated_at,''))
+        BEGIN SELECT RAISE(ABORT, 'Accepteret tilbud kræver en logget korrektion'); END""")
+
+
 MIGRATIONS = (
     (1, "core_schema", migration_001_core_schema),
     (2, "briefings", migration_002_briefings),
     (3, "followups", migration_003_followups),
     (4, "business_module", migration_004_business_module),
+    (5, "agreement_details", migration_005_agreement_details),
 )
 
 
@@ -597,6 +630,11 @@ def migrate_db(conn):
 
 def init_db():
     validate_data_configuration(APP_MODE, DATA_DIR, PRODUCTION_DATA_DIR)
+    if APP_MODE == "production" and any(m[0] >= 5 for m in pending_migrations(DB_PATH)):
+        from runtime_config import RuntimeConfigurationError
+        raise RuntimeConfigurationError(
+            "Etape 4 afventer godkendelse til drift. Brug udviklingsstarten eller den tidligere driftversion."
+        )
     ensure_data_dir()
     existing_database = DB_PATH.exists()
     migrations = pending_migrations(DB_PATH)

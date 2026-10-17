@@ -1,8 +1,9 @@
 
 
 
-APP_TITLE = "Frank Advisory Intelligence Monitor v2.4"
-APP_CAPTION = "Advisory intelligence, virksomhedsprofiler og mødeforberedelse"
+APP_TITLE = "FBM Advisory Dashboard"
+APP_VERSION = "3.0 – udviklingsversion"
+APP_CAPTION = "Strategisk overblik over kunder, rådgivningsopgaver og regulatoriske muligheder."
 
 ACTOR_TYPES = [
     "Life science-virksomhed",

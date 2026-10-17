@@ -22,6 +22,7 @@ exports/
 .stage1-test-data/
 .stage2-test-data/
 .stage3-test-data/
+.stage4-test-data/
 .test-tmp/
 .dev-data/
 .unconfigured-data/

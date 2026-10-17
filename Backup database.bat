@@ -1,5 +1,5 @@
 @echo off
-title Backup Frank Advisory Monitor database
+title Backup FBM Advisory Dashboard
 cd /d "%~dp0"
 
 set "FRANK_MONITOR_MODE=production"

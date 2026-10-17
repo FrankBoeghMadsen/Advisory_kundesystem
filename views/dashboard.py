@@ -27,8 +27,9 @@ def render():
     companies = q("SELECT * FROM companies")
     meetings = q("SELECT m.*, c.name AS company FROM meetings m LEFT JOIN companies c ON c.id=m.company_id ORDER BY m.meeting_date ASC, m.meeting_time ASC")
     observations = q("SELECT * FROM observations")
-    followups = q("""SELECT f.*, c.name AS company
+    followups = q("""SELECT f.*, c.name AS company, t.title AS commercial_track
                      FROM followups f LEFT JOIN companies c ON c.id=f.company_id
+                     LEFT JOIN commercial_tracks t ON t.id=f.commercial_track_id
                      WHERE COALESCE(f.status, 'Ny') NOT IN ('Lukket', 'Arkiveret')
                      ORDER BY
                         CASE f.priority WHEN 'Høj' THEN 1 WHEN 'Middel' THEN 2 ELSE 3 END,
@@ -137,6 +138,12 @@ def render():
                             company = f["company"] or "Ingen virksomhed"
                             person = f" · {f['person']}" if f["person"] else ""
                             st.markdown(f"**{f['title']}**")
+                            if f['commercial_track']:
+                                st.caption(f"Forretningsforløb: {f['commercial_track']}")
+                                if st.button('Åbn forløb', key=f"dash_business_{int(f['id'])}"):
+                                    st.session_state['business_track_id'] = int(f['commercial_track_id'])
+                                    set_page('Forretning')
+                                    st.rerun()
                             st.caption(f"{company}{person} · {due} · {f['followup_type']} · {f['priority']} · {f['status']}")
                             if f["next_action"]:
                                 st.write(f"**Næste handling:** {f['next_action']}")

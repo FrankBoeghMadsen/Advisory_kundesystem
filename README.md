@@ -1,4 +1,8 @@
-# Frank Advisory Intelligence Monitor
+# FBM Advisory Dashboard
+
+Aktuel udviklingsversion: 3.0. Se [ETAPE_4_BRUGEROPLEVELSE.md](ETAPE_4_BRUGEROPLEVELSE.md) for honorarregistrering, aftalebeskyttelse, migration og testresultater.
+
+Etape 4 er endnu ikke frigivet til drift. Den aktuelle kode afprøves med `Start Monitor Development.bat`; produktionstilstand stopper, hvis etape 4-migrationen afventer. Den aktive database opgraderes først efter særskilt godkendelse.
 
 En første fungerende MVP som lokal Streamlit-webapp til passiv overvågning af danske life science-virksomheder.
 

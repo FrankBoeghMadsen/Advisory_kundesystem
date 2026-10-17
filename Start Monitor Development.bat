@@ -1,5 +1,5 @@
 @echo off
-title Frank Advisory Intelligence Monitor - UDVIKLING
+title FBM Advisory Dashboard - UDVIKLING
 cd /d "%~dp0"
 
 set "FRANK_MONITOR_MODE=development"

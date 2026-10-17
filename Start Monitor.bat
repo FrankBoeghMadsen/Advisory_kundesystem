@@ -1,5 +1,5 @@
 @echo off
-title Frank Advisory Intelligence Monitor
+title FBM Advisory Dashboard
 cd /d "%~dp0"
 
 echo Starter Frank Advisory Intelligence Monitor...
