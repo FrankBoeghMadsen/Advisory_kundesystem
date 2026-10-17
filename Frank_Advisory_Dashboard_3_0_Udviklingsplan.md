@@ -476,6 +476,8 @@ Faste genveje til:
 
 ### Etape 1 – Stabilt fundament og sikker database
 
+**Status 17. oktober 2026:** Implementeret på udviklingsgrenen `codex/dashboard-3-foundation` og afventer godkendelse. Se `ETAPE_1_STABILISERING.md` for den tekniske aflevering og testresultaterne. Etape 2–7 er ikke påbegyndt.
+
 **Formål:** Reducere regressionsrisiko, før forretningsmodellen udvides.
 
 **Funktioner:**

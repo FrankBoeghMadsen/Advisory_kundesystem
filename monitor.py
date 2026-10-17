@@ -1,3 +1,5 @@
+from contextlib import closing
+
 from db import connect, insert_signal
 from connectors import fetch_source, extract_context_from_url
 from analysis_engine import analyze_signal
@@ -20,7 +22,7 @@ def match_company(item, companies):
     return best
 
 def run_monitor():
-    with connect() as conn:
+    with closing(connect()) as conn:
         sources = [dict(r) for r in conn.execute("SELECT * FROM sources WHERE active=1 AND COALESCE(status,'Aktiv')='Aktiv'")]
         companies = [dict(r) for r in conn.execute("SELECT * FROM companies WHERE status='Aktiv'")]
         rules = [dict(r) for r in conn.execute("SELECT * FROM trigger_rules WHERE active=1")]
@@ -29,11 +31,11 @@ def run_monitor():
     for source in sources:
         try:
             items = fetch_source(source)
-            with connect() as conn:
+            with closing(connect()) as conn:
                 conn.execute("UPDATE sources SET last_checked=?, last_error='' WHERE id=?", (__import__('datetime').datetime.utcnow().isoformat(), source["id"]))
                 conn.commit()
         except Exception as e:
-            with connect() as conn:
+            with closing(connect()) as conn:
                 conn.execute("UPDATE sources SET last_checked=?, last_error=? WHERE id=?", (__import__('datetime').datetime.utcnow().isoformat(), str(e)[:500], source["id"]))
                 conn.commit()
             continue

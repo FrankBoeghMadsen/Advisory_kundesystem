@@ -1,4 +1,4 @@
-# Frank Advisory Intelligence Monitor v2.4
+# Frank Advisory Intelligence Monitor
 
 En første fungerende MVP som lokal Streamlit-webapp til passiv overvågning af danske life science-virksomheder.
 
@@ -10,7 +10,7 @@ En første fungerende MVP som lokal Streamlit-webapp til passiv overvågning af 
 - Markere myndighedsreaktioner og andre relevante signaler
 - Vise dashboard, signalindbakke, virksomhedsprofiler og noter
 - Eksportere signaler til CSV
-- Bruge OpenAI til opsummering/scoring, hvis `OPENAI_API_KEY` sættes; ellers bruges regelbaseret scoring
+- Bruge OpenAI til opsummering/scoring, hvis `OPENAI_API_KEY` sættes og den konkrete overførsel godkendes; ellers bruges lokal eller regelbaseret analyse
 
 ## Kom hurtigt i gang
 
@@ -19,7 +19,7 @@ cd frank_advisory_monitor_v2_4
 python -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-streamlit run app.py
+streamlit run app.py --server.address 127.0.0.1
 ```
 
 Første gang appen startes, oprettes en lokal SQLite-database med virksomhederne fra masterlisten.
@@ -33,7 +33,26 @@ OPENAI_API_KEY=din_api_noegle
 OPENAI_MODEL=gpt-4.1-mini
 ```
 
-Uden nøgle virker appen stadig med regelbaseret scoring.
+Uden nøgle virker appen stadig med lokal og regelbaseret analyse. En API-nøgle er ikke i sig selv nok til at sende møde- eller briefingdata til OpenAI. Det kræver et aktivt valg ved hver generering.
+
+## Data og backup
+
+Den aktive database ligger i:
+
+```text
+%USERPROFILE%\FrankAdvisoryMonitorData\monitor.db
+```
+
+Ved en ny databasemigration oprettes først en verificeret backup i `Backups`. `Backup database.bat` opretter en særskilt tidsstemplet manuel backup og overskriver ikke tidligere filer.
+
+Databasekontrol og en isoleret gendannelsestest kan køres med:
+
+```powershell
+.\.venv\Scripts\python.exe db_maintenance.py verify "$env:USERPROFILE\FrankAdvisoryMonitorData\monitor.db"
+.\.venv\Scripts\python.exe db_maintenance.py restore-check "C:\sti\til\backup.db"
+```
+
+Se [ETAPE_1_STABILISERING.md](ETAPE_1_STABILISERING.md) for migrationer, testresultater og rollback.
 
 ## Bemærk
 Denne MVP bruger kun konfigurerbare offentlige feeds/web-kilder. LinkedIn er ikke automatiseret.

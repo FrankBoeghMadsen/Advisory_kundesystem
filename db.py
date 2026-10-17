@@ -2,13 +2,27 @@
 import sqlite3
 from pathlib import Path
 import csv
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import shutil
+import tempfile
+from contextlib import closing
 
 DATA_DIR = Path(os.environ.get("FRANK_MONITOR_DATA_DIR", Path.home() / "FrankAdvisoryMonitorData"))
 DB_PATH = DATA_DIR / "monitor.db"
 UPLOAD_DIR = DATA_DIR / "UploadedDocuments"
+
+
+def utc_now_iso():
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+
+MIGRATION_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+)
+"""
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS companies (
@@ -237,35 +251,119 @@ def ensure_data_dir():
     if not DB_PATH.exists() and old_local.exists():
         shutil.copy2(old_local, DB_PATH)
 
+def connect(db_path=None):
+    path = Path(db_path) if db_path else DB_PATH
+    if db_path is None:
+        ensure_data_dir()
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
+
+
+def verify_database(db_path):
+    """Return integrity details without modifying the database."""
+    path = Path(db_path).resolve()
+    if not path.exists():
+        raise FileNotFoundError(path)
+    uri = f"{path.as_uri()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        foreign_key_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+            ).fetchall()
+        ]
+        counts = {}
+        for table in tables:
+            if table.startswith("sqlite_"):
+                continue
+            escaped = table.replace('"', '""')
+            counts[table] = conn.execute(f'SELECT COUNT(*) FROM "{escaped}"').fetchone()[0]
+        return {
+            "path": str(path),
+            "integrity": integrity,
+            "foreign_key_violations": len(foreign_key_violations),
+            "tables": tables,
+            "row_counts": counts,
+        }
+    finally:
+        conn.close()
+
+
+def create_backup(label="manual", source_path=None):
+    """Create and verify a consistent SQLite backup."""
+    ensure_data_dir()
+    source = Path(source_path) if source_path else DB_PATH
+    if not source.exists():
+        raise FileNotFoundError(source)
+
+    backup_dir = DATA_DIR / "Backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    safe_label = "".join(ch for ch in label if ch.isalnum() or ch in ("-", "_")) or "backup"
+    if safe_label == "daily":
+        filename = f"monitor_{datetime.now():%Y-%m-%d}.db"
+    else:
+        filename = f"monitor_{safe_label}_{datetime.now():%Y%m%d_%H%M%S_%f}.db"
+    backup_path = backup_dir / filename
+
+    if safe_label == "daily" and backup_path.exists():
+        return backup_path
+
+    temporary_path = backup_path.with_suffix(".tmp")
+    source_uri = f"{source.resolve().as_uri()}?mode=ro"
+    source_conn = sqlite3.connect(source_uri, uri=True)
+    destination_conn = sqlite3.connect(temporary_path)
+    try:
+        source_conn.backup(destination_conn)
+    finally:
+        destination_conn.close()
+        source_conn.close()
+
+    result = verify_database(temporary_path)
+    if result["integrity"] != "ok" or result["foreign_key_violations"]:
+        temporary_path.unlink(missing_ok=True)
+        raise RuntimeError("Backup fejlede integritetskontrollen")
+    os.replace(temporary_path, backup_path)
+    return backup_path
+
+
 def backup_db_if_needed():
     if not DB_PATH.exists():
-        return
-    stamp = datetime.now().strftime("%Y-%m-%d")
-    backup_path = DATA_DIR / "Backups" / f"monitor_{stamp}.db"
-    if not backup_path.exists():
-        shutil.copy2(DB_PATH, backup_path)
+        return None
+    return create_backup("daily")
 
-def connect():
-    ensure_data_dir()
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+
+def restore_test(backup_path):
+    """Prove that a backup can be restored and opened, without touching live data."""
+    backup = Path(backup_path)
+    restore_root = DATA_DIR / "RestoreTests"
+    restore_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="frank-monitor-restore-", dir=restore_root
+    ) as temp_dir:
+        restored = Path(temp_dir) / "monitor.db"
+        source_conn = sqlite3.connect(f"{backup.resolve().as_uri()}?mode=ro", uri=True)
+        destination_conn = sqlite3.connect(restored)
+        try:
+            source_conn.backup(destination_conn)
+        finally:
+            destination_conn.close()
+            source_conn.close()
+        return verify_database(restored)
 
 def add_column_if_missing(conn, table, column, definition):
     cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
     if column not in cols:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
-def init_db():
-    conn = connect()
-    conn.executescript(SCHEMA)
-    migrate_db(conn)
-    conn.commit()
-    seed_if_empty(conn)
-    conn.close()
-    backup_db_if_needed()
-
-def migrate_db(conn):
+def migration_001_core_schema(conn):
+    for statement in SCHEMA.split(";"):
+        if statement.strip():
+            conn.execute(statement)
     add_column_if_missing(conn, "companies", "actor_type", "TEXT DEFAULT 'Life science-virksomhed'")
     add_column_if_missing(conn, "companies", "aliases", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "companies", "status", "TEXT DEFAULT 'Aktiv'")
@@ -294,6 +392,8 @@ def migrate_db(conn):
     add_column_if_missing(conn, "meetings", "meeting_time", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "meetings", "location", "TEXT DEFAULT ''")
 
+
+def migration_002_briefings(conn):
     add_column_if_missing(conn, "briefings", "meeting_id", "INTEGER")
     add_column_if_missing(conn, "briefings", "user_notes", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "briefings", "source_context", "TEXT DEFAULT ''")
@@ -301,6 +401,8 @@ def migrate_db(conn):
     add_column_if_missing(conn, "briefings", "status", "TEXT DEFAULT 'Aktiv'")
     add_column_if_missing(conn, "briefings", "updated_at", "TEXT DEFAULT ''")
 
+
+def migration_003_followups(conn):
     add_column_if_missing(conn, "followups", "company_id", "INTEGER")
     add_column_if_missing(conn, "followups", "followup_type", "TEXT DEFAULT 'Opfølgning'")
     add_column_if_missing(conn, "followups", "description", "TEXT DEFAULT ''")
@@ -314,6 +416,78 @@ def migrate_db(conn):
     add_column_if_missing(conn, "followups", "updated_at", "TEXT DEFAULT ''")
     conn.execute("UPDATE followups SET followup_type='Opfølgning' WHERE followup_type IS NULL OR followup_type=''")
 
+
+MIGRATIONS = (
+    (1, "core_schema", migration_001_core_schema),
+    (2, "briefings", migration_002_briefings),
+    (3, "followups", migration_003_followups),
+)
+
+
+def applied_migration_versions(db_path):
+    path = Path(db_path)
+    if not path.exists():
+        return set()
+    uri = f"{path.resolve().as_uri()}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+        ).fetchone()
+        if not exists:
+            return set()
+        return {row[0] for row in conn.execute("SELECT version FROM schema_migrations")}
+    finally:
+        conn.close()
+
+
+def pending_migrations(db_path=None):
+    path = Path(db_path) if db_path else DB_PATH
+    applied = applied_migration_versions(path)
+    return [migration for migration in MIGRATIONS if migration[0] not in applied]
+
+
+def migrate_db(conn):
+    conn.execute(MIGRATION_TABLE_SQL)
+    applied = {row[0] for row in conn.execute("SELECT version FROM schema_migrations")}
+    for version, name, migration in MIGRATIONS:
+        if version in applied:
+            continue
+        try:
+            conn.execute("BEGIN")
+            migration(conn)
+            conn.execute(
+                "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+                (version, name, utc_now_iso()),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def init_db():
+    ensure_data_dir()
+    existing_database = DB_PATH.exists()
+    migrations = pending_migrations(DB_PATH)
+    if existing_database and migrations:
+        create_backup("pre_migration")
+
+    conn = connect()
+    try:
+        migrate_db(conn)
+        seed_if_empty(conn)
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        foreign_key_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if integrity != "ok" or foreign_key_violations:
+            raise RuntimeError(
+                f"Databasekontrol fejlede: integrity={integrity}, "
+                f"foreign_key_violations={len(foreign_key_violations)}"
+            )
+    finally:
+        conn.close()
+    backup_db_if_needed()
+
 def seed_if_empty(conn):
     cur = conn.execute("SELECT COUNT(*) AS n FROM companies")
     if cur.fetchone()["n"] == 0 and Path("seed_data/companies.csv").exists():
@@ -321,7 +495,7 @@ def seed_if_empty(conn):
             for row in csv.DictReader(f):
                 conn.execute(
                     "INSERT OR IGNORE INTO companies (name, category, country, priority, status, created_at) VALUES (?, ?, ?, ?, 'Aktiv', ?)",
-                    (row["name"], row["category"], row["country"], row["priority"], datetime.utcnow().isoformat())
+                    (row["name"], row["category"], row["country"], row["priority"], utc_now_iso())
                 )
     cur = conn.execute("SELECT COUNT(*) AS n FROM sources")
     if cur.fetchone()["n"] == 0 and Path("seed_data/sources.csv").exists():
@@ -329,7 +503,7 @@ def seed_if_empty(conn):
             for row in csv.DictReader(f):
                 conn.execute(
                     "INSERT INTO sources (name, source_type, url, keywords, active, status, priority, created_at) VALUES (?, ?, ?, ?, ?, 'Aktiv', 'Middel', ?)",
-                    (row["name"], row["source_type"], row["url"], row["keywords"], int(row["active"]), datetime.utcnow().isoformat())
+                    (row["name"], row["source_type"], row["url"], row["keywords"], int(row["active"]), utc_now_iso())
                 )
     cur = conn.execute("SELECT COUNT(*) AS n FROM trigger_rules")
     if cur.fetchone()["n"] == 0 and Path("seed_data/trigger_rules.csv").exists():
@@ -343,16 +517,16 @@ def seed_if_empty(conn):
 
 def fetch_df(query, params=()):
     import pandas as pd
-    with connect() as conn:
+    with closing(connect()) as conn:
         return pd.read_sql_query(query, conn, params=params)
 
 def execute(query, params=()):
-    with connect() as conn:
+    with closing(connect()) as conn:
         conn.execute(query, params)
         conn.commit()
 
 def insert_signal(signal):
-    with connect() as conn:
+    with closing(connect()) as conn:
         conn.execute("""
             INSERT OR IGNORE INTO signals
             (company_id, source_id, title, url, published_at, collected_at, raw_summary,

@@ -19,6 +19,8 @@ env/
 FrankAdvisoryMonitorData/
 backups/
 exports/
+.stage1-test-data/
+.test-tmp/
 
 .DS_Store
 Thumbs.db

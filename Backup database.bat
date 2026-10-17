@@ -1,17 +1,14 @@
 @echo off
 title Backup Frank Advisory Monitor database
+cd /d "%~dp0"
 
-set DATA_DIR=%USERPROFILE%\FrankAdvisoryMonitorData
-set BACKUP_DIR=%DATA_DIR%\Backups
-
-if not exist "%BACKUP_DIR%" mkdir "%BACKUP_DIR%"
-
-if exist "%DATA_DIR%\monitor.db" (
-    copy "%DATA_DIR%\monitor.db" "%BACKUP_DIR%\monitor_manual_backup.db"
-    echo Backup oprettet i:
-    echo %BACKUP_DIR%
-) else (
-    echo Ingen database fundet i %DATA_DIR%
+if not exist ".venv\Scripts\python.exe" (
+    echo Python-miljoet mangler. Start foerst programmet med Start Monitor.bat.
+    pause
+    exit /b 1
 )
+
+".venv\Scripts\python.exe" db_maintenance.py backup --label manual
+if errorlevel 1 echo Backup blev ikke oprettet. Se fejlmeddelelsen ovenfor.
 
 pause

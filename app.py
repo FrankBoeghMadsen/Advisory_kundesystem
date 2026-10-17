@@ -34,8 +34,15 @@ FOLLOWUP_TYPES = [
 
 FOLLOWUP_STATUSES = ["Ny", "Planlagt", "I gang", "Afventer", "Lukket", "Arkiveret"]
 
-def ai_briefing_text(company_name, context_text):
+def ai_briefing_text(company_name, context_text, allow_external=False):
     """AI briefing via OpenAI with local fallback."""
+    if not allow_external:
+        return f"""# Ekstern AI er ikke anvendt
+
+Af hensyn til fortrolighed sendes oplysninger kun til OpenAI, når du aktivt godkender det for den konkrete generering.
+
+{local_briefing_text(company_name, context_text)}
+"""
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key:
         try:
@@ -192,8 +199,17 @@ def local_briefing_text(company_name, context_text):
 - Opdater briefing eller noter, hvis der kom ny strategisk viden.
 """
 
-def ai_meeting_followup_text(company_name, meeting_title, meeting_text, context_text):
+def ai_meeting_followup_text(
+    company_name, meeting_title, meeting_text, context_text, allow_external=False
+):
     """AI follow-up from meeting minutes with local fallback."""
+    if not allow_external:
+        return f"""# Ekstern AI er ikke anvendt
+
+Af hensyn til fortrolighed sendes referatet kun til OpenAI, når du aktivt godkender det for den konkrete generering.
+
+{local_meeting_followup_text(company_name, meeting_title)}
+"""
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key:
         try:
@@ -375,18 +391,6 @@ def sync_actor_sources(actor_name, website, linkedin, aliases="", actor_status="
                (name, source_type, url, keywords, active, status, priority, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (f"{actor_name} - {label}", source_type, clean_url, keywords, active, status, "Høj" if label == "LinkedIn" else "Middel", now_iso()),
-        )
-
-def sync_existing_actor_sources(companies_df):
-    if not len(companies_df):
-        return
-    for _, actor in companies_df.iterrows():
-        sync_actor_sources(
-            actor["name"],
-            actor.get("website", "") if hasattr(actor, "get") else actor["website"],
-            actor.get("linkedin", "") if hasattr(actor, "get") else actor["linkedin"],
-            actor.get("aliases", "") if hasattr(actor, "get") else actor["aliases"],
-            actor.get("status", "Aktiv") if hasattr(actor, "get") else actor["status"],
         )
 
 def field_label(name):
@@ -712,7 +716,6 @@ if page == "Dashboard":
                    FROM signals s LEFT JOIN companies c ON c.id=s.company_id
                    ORDER BY s.collected_at DESC""")
     companies = q("SELECT * FROM companies")
-    sync_existing_actor_sources(companies)
     meetings = q("SELECT m.*, c.name AS company FROM meetings m LEFT JOIN companies c ON c.id=m.company_id ORDER BY m.meeting_date ASC, m.meeting_time ASC")
     observations = q("SELECT * FROM observations")
     followups = q("""SELECT f.*, c.name AS company
@@ -1412,12 +1415,18 @@ elif page == "Virksomheder":
                                         key=f"meeting_raw_text_{int(m['id'])}",
                                     )
                                 followup_key = f"meeting_ai_followup_{int(m['id'])}"
+                                allow_external_followup = st.checkbox(
+                                    "Tillad, at dette referat og den tilknyttede kontekst sendes til OpenAI",
+                                    value=False,
+                                    key=f"allow_external_followup_{int(m['id'])}",
+                                )
                                 if st.button("Lav AI-opfølgning på referat", key=f"generate_followup_{int(m['id'])}"):
                                     st.session_state[followup_key] = ai_meeting_followup_text(
                                         row["name"],
                                         m["title"],
                                         m["raw_text"],
                                         briefing_context(company_id),
+                                        allow_external=allow_external_followup,
                                     )
                                 if followup_key in st.session_state:
                                     st.markdown("**AI-opfølgning**")
@@ -2509,9 +2518,16 @@ elif page == "Briefing":
         with tab_draft:
             st.markdown("### AI-udkast til mødeforberedelse")
             generated_key = f"generated_briefing_{cid}_{selected_meeting_id or 'none'}"
+            allow_external_briefing = st.checkbox(
+                "Tillad, at datagrundlaget sendes til OpenAI for denne briefing",
+                value=False,
+                key=f"allow_external_briefing_{cid}_{selected_meeting_id or 'none'}",
+            )
             a, b = st.columns([1, 1])
             if a.button("Generér briefing", type="primary"):
-                st.session_state[generated_key] = ai_briefing_text(selected, context)
+                st.session_state[generated_key] = ai_briefing_text(
+                    selected, context, allow_external=allow_external_briefing
+                )
             if b.button("Åbn profil"):
                 open_company_section(cid, "Briefing")
                 st.rerun()

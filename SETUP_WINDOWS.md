@@ -39,15 +39,35 @@ python -m pip install -r requirements.txt
 ## 5. Start appen
 
 ```powershell
-streamlit run app.py
+streamlit run app.py --server.address 127.0.0.1
 ```
 
-## iPad på samme netværk
+Du kan også bruge `Start Monitor.bat`. Den binder som standard kun appen til `127.0.0.1`, så andre enheder på netværket ikke kan åbne den.
 
-Når appen kører lokalt på PC'en, kan den normalt åbnes fra en iPad på samme Wi-Fi via PC'ens lokale IP-adresse og Streamlit-porten, typisk:
+## Opdater dependencies
 
-```text
-http://PC_LOCAL_IP:8501
+Startfilen installerer ikke længere pakker ved hver start. Hvis `requirements.txt` ændres, køres:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Brug `Start Monitor.bat`, som viser både PC-adressen og iPad-adressen. Hvis iPad ikke kan forbinde, skyldes det typisk Windows Firewall eller at PC og iPad ikke er på samme netværk.
+## Backup og kontrol
+
+Kør `Backup database.bat` for en tidsstemplet og integritetskontrolleret manuel backup. Tidligere manuelle backups overskrives ikke.
+
+En database kan kontrolleres uden at ændre den:
+
+```powershell
+.\.venv\Scripts\python.exe db_maintenance.py verify "$env:USERPROFILE\FrankAdvisoryMonitorData\monitor.db"
+```
+
+En backup kan prøvegengendannes i en midlertidig mappe uden at ændre den aktive database:
+
+```powershell
+.\.venv\Scripts\python.exe db_maintenance.py restore-check "C:\sti\til\backup.db"
+```
+
+## iPad og fjernadgang
+
+Fjernadgang er ikke aktiveret i etape 1. Sikker adgang fra iPad uden en tændt PC kræver senere en særskilt hosting-, login- og backupbeslutning. Appen bør ikke eksponeres direkte på internettet.
