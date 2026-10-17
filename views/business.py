@@ -10,9 +10,11 @@ from app_config import (TRACK_STATUSES, TRACK_CLOSE_REASONS, PROPOSAL_STATUSES,
 from repositories import q
 from services.business_service import (save_business_record, next_proposal_version,
     create_engagement_from_proposal, record_amendment, set_track_meetings,
-    set_track_followups, set_deliverable_followups)
+    set_track_followups, set_deliverable_followups, accept_amendment, document_legacy_acceptance)
+from services.activity_service import dashboard_data, ACTIVE_ENGAGEMENTS
+from ui.navigation import open_business, open_activity, open_company_section
 from services.business_values import (clean, number_text, parse_danish_number,
-                                      fee_text, parse_date, date_text, iso_date)
+                                      fee_text, parse_date, date_text, iso_date, timestamp_text)
 
 FIELD_LABELS = {'title':'Titel', 'scope':'Omfang', 'deliverables_summary':'Leverancer',
     'assumptions':'Forudsætninger', 'fee_model':'Honorarmodel', 'offered_fee_ex_vat':'Tilbudt honorar',
@@ -58,7 +60,7 @@ def _fees(prefix, row, agreed=False):
 
 
 def _parsed_fees(values):
-    return {key: parse_danish_number(value) if key not in ('fee_model', 'fee_note') else value
+    return {key: parse_danish_number(value,allow_currency=key not in ('max_hours','included_hours')) if key not in ('fee_model', 'fee_note') else value
             for key, value in values.items()}
 
 
@@ -122,16 +124,20 @@ def _links(row):
     meetings = q('SELECT id, title, meeting_date FROM meetings WHERE company_id=? ORDER BY meeting_date DESC', (company_id,))
     linked = q('SELECT meeting_id FROM meeting_tracks WHERE track_id=?', (track_id,))
     ids = [int(x) for x in meetings['id']]
-    selected = st.multiselect('Møder', ids, default=[int(x) for x in linked['meeting_id'] if x in ids],
-        format_func=lambda x: f"{date_text(meetings.loc[meetings['id']==x,'meeting_date'].iloc[0])} · {meetings.loc[meetings['id']==x,'title'].iloc[0]}", key=f'meeting_links_{track_id}')
+    selected = st.multiselect('Møder', ids, default=[int(x) for x in linked['meeting_id'] if x in ids], placeholder='Vælg møder',
+        format_func=lambda x: f"{date_text(meetings.loc[meetings['id']==x,'meeting_date'].iloc[0])} · {meetings.loc[meetings['id']==x,'title'].iloc[0]}", key=f'meeting_links_{track_id}') if ids else []
+    if not ids:
+        st.caption('Ingen møder registreret.')
     if st.button('Gem mødekoblinger', key=f'save_meetings_{track_id}'):
         set_track_meetings(track_id, selected)
         st.rerun()
     followups = q('SELECT id, title FROM followups WHERE company_id=? ORDER BY created_at DESC', (company_id,))
     linked_f = q('SELECT id FROM followups WHERE commercial_track_id=?', (track_id,))
     ids_f = [int(x) for x in followups['id']]
-    selected_f = st.multiselect('Opfølgninger', ids_f, default=[int(x) for x in linked_f['id'] if x in ids_f],
-        format_func=lambda x: followups.loc[followups['id']==x, 'title'].iloc[0], key=f'follow_links_{track_id}')
+    selected_f = st.multiselect('Opfølgninger', ids_f, default=[int(x) for x in linked_f['id'] if x in ids_f], placeholder='Vælg opfølgninger',
+        format_func=lambda x: followups.loc[followups['id']==x, 'title'].iloc[0], key=f'follow_links_{track_id}') if ids_f else []
+    if not ids_f:
+        st.caption('Ingen opfølgninger registreret.')
     if st.button('Gem opfølgningskoblinger', key=f'save_follow_{track_id}'):
         set_track_followups(track_id, selected_f)
         st.rerun()
@@ -171,41 +177,31 @@ def _engagement_editor(row, track_id, proposal=None):
     start = _date('Startdato', row.get('start_date'), prefix+'_start')
     end = _date('Forventet slutdato', row.get('target_end_date'), prefix+'_end')
     completed = _date('Faktisk afslutningsdato', row.get('completed_at'), prefix+'_completed')
-    fees = _fees(prefix, row, agreed=True)
-    actual, reuse, reuse_note = None, 'Ikke vurderet', ''
-    outcome, future = row.get('outcome_notes') or '', row.get('future_collaboration_note') or ''
-    with st.container():
-        st.markdown('**Evaluering og læring**')
-        actual = _number('Faktisk anvendte timer', row.get('actual_hours'), prefix+'_actual')
-        reuse = _select('Genanvendelsespotentiale', ['Ikke vurderet','Ja','Nej'], row.get('reuse_potential', 'Ikke vurderet'), prefix+'_reuse')
-        reuse_note = st.text_area('Genanvendelig viden, metoder eller værktøjer', row.get('reuse_notes') or '', key=prefix+'_reuse_note')
-        outcome = st.text_area('Resultat / læring', outcome, key=prefix+'_outcome')
-        future = st.text_area('Muligt fremtidigt samarbejde', future, key=prefix+'_future')
+    fees = _fees(prefix, row, agreed=True) if not row.get('id') else {}
     if st.button('Accepter tilbud og opret kundeopgave' if proposal else 'Gem kundeopgave', key=prefix+'_save', type='primary'):
         try:
             parsed = _parsed_fees(fees)
-            parsed_actual = parse_danish_number(actual)
             if not title.strip():
                 raise ValueError('Opgavetitel skal udfyldes.')
             if proposal:
                 created_id = create_engagement_from_proposal(int(proposal['id']), title, description, status,
                     iso_date(start), iso_date(end), parsed['fee_model'], parsed['agreed_fee_ex_vat'],
                     parsed['fee_note'], parsed.get('max_hours'), parsed.get('fee_cap_ex_vat'), parsed.get('included_hours'))
-                save_business_record('engagements', dict(title=title, completed_at=iso_date(completed),
-                    actual_hours=parsed_actual, reuse_potential=reuse,
-                    reuse_notes=reuse_note, outcome_notes=outcome, future_collaboration_note=future), created_id)
+                save_business_record('engagements', dict(title=title, completed_at=iso_date(completed)), created_id)
                 st.rerun()
             else:
                 _save('engagements', dict(track_id=track_id, title=title, description=description,
                     status=status, start_date=iso_date(start), target_end_date=iso_date(end), completed_at=iso_date(completed),
-                    outcome_notes=outcome, future_collaboration_note=future, actual_hours=parsed_actual,
-                    reuse_potential=reuse, reuse_notes=reuse_note, **parsed), row.get('id'))
+                    **parsed), row.get('id'))
         except ValueError as exc:
             st.error(str(exc))
 
 
 def _fee_details(row, agreed=False):
-    st.write(f"**{row['fee_model']}:** {fee_text(row['agreed_fee_ex_vat' if agreed else 'offered_fee_ex_vat'], row['fee_model'])}")
+    label='Aktuelt aftalt honorar' if agreed else row['fee_model']
+    st.write(f"**{label}:** {fee_text(row['agreed_fee_ex_vat' if agreed else 'offered_fee_ex_vat'], row['fee_model'])}")
+    if agreed:
+        st.caption(row['fee_model'])
     for key, label in [('max_hours','Aftalt timeloft'),('fee_cap_ex_vat','Honorarloft ekskl. moms'),('included_hours','Inkluderede timer')]:
         if clean(row.get(key)) is not None:
             st.caption(f'{label}: {number_text(row[key])}')
@@ -217,6 +213,9 @@ def _proposals(track_id):
     with st.expander('Opret tilbud'):
         _proposal_editor({}, track_id)
     rows = q('SELECT * FROM proposals WHERE track_id=? ORDER BY version DESC', (track_id,))
+    focus=st.session_state.get('business_focus',{})
+    if focus.get('kind')=='proposal':
+        rows=rows[rows['id']==focus['id']]
     for _, series in rows.iterrows():
         row = series.to_dict()
         proposal_id = int(row['id'])
@@ -240,7 +239,7 @@ def _proposals(track_id):
                     if not len(logs):
                         st.caption('Ingen korrektioner.')
                     for _, log in logs.iterrows():
-                        st.write(f"{log['changed_at']} · {log['reason']}")
+                        st.write(f"{timestamp_text(log['changed_at'])} · {log['reason']}")
                         old, new = json.loads(log['previous_values']), json.loads(log['new_values'])
                         st.table([{'Felt': FIELD_LABELS.get(key,key),
                                    'Tidligere': str(old[key]) if old[key] is not None else 'Ikke registreret',
@@ -278,7 +277,14 @@ def _deliverable_editor(row, engagement_id):
 def _engagements(track_id):
     with st.expander('Opret kundeopgave uden tilbud'):
         _engagement_editor({}, track_id)
-    for _, series in q('SELECT * FROM engagements WHERE track_id=? ORDER BY created_at DESC', (track_id,)).iterrows():
+    rows=q('SELECT * FROM engagements WHERE track_id=? ORDER BY created_at DESC', (track_id,))
+    focus=st.session_state.get('business_focus',{})
+    if focus.get('kind')=='engagement':
+        rows=rows[rows['id']==focus['id']]
+    elif focus.get('kind')=='deliverable':
+        parent=q('SELECT engagement_id FROM deliverables WHERE id=?',(focus['id'],))
+        rows=rows[rows['id'].isin(parent['engagement_id'].tolist())]
+    for _, series in rows.iterrows():
         row = series.to_dict()
         eid = int(row['id'])
         with st.container(border=True):
@@ -302,39 +308,87 @@ def _engagements(track_id):
                 st.caption(f"Start: {date_text(original.get('start_date'))} · Slut: {date_text(original.get('target_end_date'))}")
                 if clean(row['accepted_proposal_id']) is not None:
                     st.caption(f"Grundlag: tilbud #{int(row['accepted_proposal_id'])}")
+                if row['accepted_proposal_snapshot']:
+                    accepted=json.loads(row['accepted_proposal_snapshot'])
+                    st.markdown('**Tilbud ved accept**')
+                    st.write(accepted.get('scope') or accepted.get('title',''))
+                    st.write(fee_text(accepted.get('offered_fee_ex_vat'),accepted.get('fee_model','Fast pris')))
+                else:
+                    st.caption('Tilbudsversion ved accept er ikke særskilt registreret historisk.')
             with st.expander('Aftaleændringer'):
                 for _, amendment in q('SELECT * FROM engagement_amendments WHERE engagement_id=? ORDER BY id DESC', (eid,)).iterrows():
                     st.write(f"**{date_text(amendment['amendment_date'])}** · {amendment['description']}")
+                    st.caption(amendment['status'] if amendment['status']!='Historisk registreret' else 'Tidligere registreret – acceptstatus ikke registreret')
+                    if amendment['accepted_at']:
+                        st.caption(f"Registreret: {timestamp_text(amendment['accepted_at'])}")
                     if clean(amendment['new_fee']) is not None:
                         st.caption(f"Honorar: {number_text(amendment['previous_fee']) or 'Ikke registreret'} → {number_text(amendment['new_fee'])}")
-                    st.write(amendment['acceptance_reference'] or '')
+                    st.write(amendment['acceptance_reference'] or 'Dokumentationsgrundlag ikke angivet.')
+                    changed_terms=json.loads(amendment['proposed_terms'] or '{}')
+                    if changed_terms:
+                        st.table([{'Vilkår':FIELD_LABELS.get(k,'Aftalt honorar' if k=='agreed_fee_ex_vat' else k),
+                            'Ny værdi':(number_text(v) if isinstance(v,(int,float)) else str(v)) if v is not None else 'Ikke registreret'} for k,v in changed_terms.items()])
+                    accept_ref=None
+                    if amendment['status']=='Foreslået':
+                        accept_ref=st.text_input('Acceptreference (mail, møde eller mundtlig aftale)',amendment['acceptance_reference'] or '',key=f"accept_ref_{amendment['id']}")
+                    if amendment['status']=='Foreslået' and st.button('Registrér kundens accept',key=f"accept_amendment_{amendment['id']}"):
+                        try:
+                            accept_amendment(int(amendment['id']),accept_ref)
+                            st.rerun()
+                        except ValueError as exc:
+                            st.error(str(exc))
+                    if amendment['status']=='Historisk registreret':
+                        legacy_ref=st.text_input('Dokumentér historisk accept',amendment['acceptance_reference'] or '',key=f"legacy_ref_{amendment['id']}")
+                        if st.button('Gem historisk acceptreference',key=f"legacy_save_{amendment['id']}"):
+                            try:
+                                document_legacy_acceptance(int(amendment['id']),legacy_ref)
+                                st.rerun()
+                            except ValueError as exc:
+                                st.error(str(exc))
                 day = _date('Ændringsdato', None, f'amendment_day_{eid}')
                 description = st.text_area('Beskrivelse af aftaleændring', key=f'amendment_desc_{eid}')
                 new_fee = _number('Nyt aftalt honorar ekskl. moms', None, f'amendment_fee_{eid}')
                 reference = st.text_input('Reference til kundens accept / dokumentation', key=f'amendment_ref_{eid}')
+                amendment_status=st.radio('Aftalestatus',['Foreslået','Accepteret'],key=f'amendment_status_{eid}',horizontal=True)
+                terms={}
+                if st.checkbox('Ændr honorarmodel eller øvrige honorarvilkår',key=f'amendment_terms_{eid}'):
+                    parsed_source=_fees(f'amendment_terms_{eid}',row,agreed=True)
+                    terms=parsed_source
                 if st.button('Registrér aftaleændring', key=f'amendment_save_{eid}'):
                     try:
-                        record_amendment(eid, iso_date(day), description, reference, parse_danish_number(new_fee))
+                        parsed_terms=_parsed_fees(terms) if terms else {}
+                        record_amendment(eid, iso_date(day), description, reference,
+                            parse_danish_number(new_fee,allow_currency=True),amendment_status,parsed_terms)
                         st.rerun()
                     except ValueError as exc:
                         st.error(str(exc))
             with st.expander('Evaluering'):
-                st.write(f"Faktisk anvendte timer: {number_text(row['actual_hours']) or 'Ikke registreret'}")
-                st.write(f"Genanvendelsespotentiale: {row['reuse_potential']}")
-                st.write(row['reuse_notes'] or '')
-                st.write(row['outcome_notes'] or '')
-                st.write(row['future_collaboration_note'] or '')
+                actual=_number('Faktisk anvendte timer',row['actual_hours'],f'eval_hours_{eid}')
+                reuse=_select('Genanvendelsespotentiale',['Ikke vurderet','Ja','Nej'],row['reuse_potential'],f'eval_reuse_{eid}')
+                notes=st.text_area('Genanvendelig viden, metoder og værktøjer',row['reuse_notes'] or '',key=f'eval_notes_{eid}')
+                outcome=st.text_area('Resultat og læring',row['outcome_notes'] or '',key=f'eval_outcome_{eid}')
+                future=st.text_area('Muligt fremtidigt samarbejde',row['future_collaboration_note'] or '',key=f'eval_future_{eid}')
+                if st.button('Gem evaluering',key=f'eval_save_{eid}'):
+                    try:
+                        _save('engagements',dict(title=row['title'],actual_hours=parse_danish_number(actual),
+                            reuse_potential=reuse,reuse_notes=notes,outcome_notes=outcome,future_collaboration_note=future),eid)
+                    except ValueError as exc:
+                        st.error(str(exc))
             st.markdown('**Leverancer**')
             for _, delivery_series in q('SELECT * FROM deliverables WHERE engagement_id=? ORDER BY due_date, id', (eid,)).iterrows():
                 delivery = delivery_series.to_dict()
+                if focus.get('kind')=='deliverable' and int(delivery['id'])!=focus.get('id'):
+                    continue
                 st.write(f"{delivery['title']} · {delivery['status']} · {date_text(delivery['due_date'])}")
-                with st.expander(f"Redigér leverance: {delivery['title']}"):
+                with st.expander(f"Redigér leverance: {delivery['title']}",expanded=focus.get('kind')=='deliverable'):
                     _deliverable_editor(delivery, eid)
                     candidates = q('SELECT id, title FROM followups WHERE company_id=(SELECT company_id FROM commercial_tracks WHERE id=?)', (track_id,))
                     linked = q('SELECT id FROM followups WHERE deliverable_id=?', (int(delivery['id']),))
                     ids = [int(x) for x in candidates['id']]
-                    chosen = st.multiselect('Opfølgninger til leverancen', ids, default=[int(x) for x in linked['id'] if x in ids],
-                        format_func=lambda x: candidates.loc[candidates['id']==x,'title'].iloc[0], key=f"delivery_links_{delivery['id']}")
+                    chosen = st.multiselect('Opfølgninger til leverancen', ids, default=[int(x) for x in linked['id'] if x in ids], placeholder='Vælg opfølgninger',
+                        format_func=lambda x: candidates.loc[candidates['id']==x,'title'].iloc[0], key=f"delivery_links_{delivery['id']}") if ids else []
+                    if not ids:
+                        st.caption('Ingen opfølgninger registreret.')
                     if st.button('Gem leverancekoblinger', key=f"delivery_link_save_{delivery['id']}"):
                         set_deliverable_followups(int(delivery['id']), chosen)
                         st.rerun()
@@ -342,8 +396,39 @@ def _engagements(track_id):
                 _deliverable_editor({}, eid)
 
 
+def _render_listing(label):
+    rows=dashboard_data()['groups'].get(label,[])
+    st.markdown(f'### {label} ({len(rows)})')
+    for row in rows:
+        cols=st.columns([5,1])
+        cols[0].write(f"**{row['company'] or 'Ingen aktør'}** · {row['title']} · {row.get('status','')}")
+        if cols[1].button('Åbn',key=f"listing_{label}_{row['id']}"):
+            if label=='Aktive kunder':
+                st.session_state.pop('business_listing',None)
+                open_company_section(row['company_id'],'Forretning')
+            elif label=='Åbne opfølgninger':
+                open_activity(dict(row,kind='Opfølgning'))
+            elif label=='Åbne leverancer':
+                open_activity(dict(row,kind='Leverancefrist'))
+            elif label=='Tilbud afventer svar':
+                open_activity(dict(row,kind='Tilbudsfrist'))
+            elif label=='Aktive kundeopgaver':
+                open_business(row['track_id'],'Kundeopgaver',int(row['id']),'engagement')
+            else:
+                open_business(row['id'])
+            st.rerun()
+    if not rows:
+        st.caption('Ingen registreringer i oversigten.')
+    if st.button('Alle forretningsforløb',key='leave_listing'):
+        st.session_state.pop('business_listing',None)
+        st.rerun()
+
+
 def render():
     st.subheader('Forretning')
+    if st.session_state.get('business_listing'):
+        _render_listing(st.session_state['business_listing'])
+        return
     companies = q('SELECT id, name FROM companies ORDER BY name')
     tracks = q('''SELECT t.*, c.name AS company FROM commercial_tracks t
         JOIN companies c ON c.id=t.company_id ORDER BY t.created_at DESC, t.id DESC''')
@@ -365,7 +450,10 @@ def render():
         if len(match) and match.iloc[0]['name'] in actor_options:
             st.session_state['business_actor_filter'] = match.iloc[0]['name']
     actor = _select('Kunde / aktør', actor_options, 'Alle', 'business_actor_filter')
-    statuses = st.multiselect('Status på forløb', TRACK_STATUSES, default=TRACK_STATUSES, key='business_status_filter')
+    if 'business_status_filter' not in st.session_state:
+        st.session_state['business_status_filter']=TRACK_STATUSES
+    statuses = st.multiselect('Status på forløb', TRACK_STATUSES,
+        default=None, key='business_status_filter')
     search = st.text_input('Søg efter forløb', key='business_search')
     shown = tracks[tracks['status'].isin(statuses)]
     if actor != 'Alle':
@@ -382,28 +470,50 @@ def render():
     selected = st.selectbox('Åbn forretningsforløb', ids, format_func=lambda x:
         f"{shown.loc[shown['id']==x,'company'].iloc[0]} · {shown.loc[shown['id']==x,'title'].iloc[0]}", key='business_selected_track')
     row = shown.loc[shown['id']==selected].iloc[0].to_dict()
+    if st.session_state.get('business_focus',{}).get('track_id',selected)!=selected:
+        st.session_state.pop('business_focus',None)
     st.markdown(f"### {row['company']} · {row['title']}")
     st.caption(f"{row['status']} · Beslutning: {date_text(row['expected_decision_date'])}")
     _followups(selected, 'selected_track')
-    overview, proposals, engagements, deadlines, completed = st.tabs(['Pipeline','Tilbud','Kundeopgaver','Deadlines','Afsluttet'])
-    with overview:
+    counts={
+        'Tilbud':int(q('SELECT COUNT(*) AS n FROM proposals WHERE track_id=?',(selected,)).iloc[0]['n']),
+        'Kundeopgaver':int(q('SELECT COUNT(*) AS n FROM engagements WHERE track_id=?',(selected,)).iloc[0]['n']),
+        'Afsluttet':int(q("SELECT COUNT(*) AS n FROM engagements WHERE track_id=? AND status IN ('Afsluttet','Annulleret')",(selected,)).iloc[0]['n'])}
+    deliveries=q('''SELECT d.*, e.title AS engagement, e.track_id FROM deliverables d
+        JOIN engagements e ON e.id=d.engagement_id WHERE e.track_id=?
+        AND d.status NOT IN ('Leveret','Annulleret') AND e.status IN ('Planlagt','I gang','Afventer')
+        ORDER BY d.due_date,d.id''',(selected,))
+    deliveries=deliveries[deliveries['due_date'].apply(lambda value:parse_date(value) is not None)]
+    counts['Deadlines']=len(deliveries)
+    if st.session_state.get('business_focus',{}).get('id'):
+        if st.button('Vis hele forløbet',key='clear_business_focus'):
+            st.session_state.pop('business_focus',None)
+            st.rerun()
+    st.divider()
+    sections=['Pipeline','Tilbud','Kundeopgaver','Deadlines','Afsluttet']
+    requested_section=st.session_state.pop('business_requested_section',None)
+    section=st.radio('Forretningsområde',sections,
+        index=sections.index(requested_section or st.session_state.get('business_section','Pipeline')),
+        horizontal=True,key='business_section',format_func=lambda name:f'{name} ({counts[name]})' if name in counts else name)
+    st.divider()
+    if section=='Pipeline':
         st.write(row['need_description'] or 'Intet behov beskrevet.')
         with st.expander('Redigér forretningsforløb'):
             _track_editor(row, companies)
         with st.expander('Møder og opfølgningskoblinger'):
             _links(row)
-    with proposals:
+    elif section=='Tilbud':
         _proposals(selected)
-    with engagements:
+    elif section=='Kundeopgaver':
         _engagements(selected)
-    with deadlines:
-        deliveries = q('''SELECT d.title, d.status, d.due_date, e.title AS engagement
-            FROM deliverables d JOIN engagements e ON e.id=d.engagement_id
-            WHERE e.track_id=? ORDER BY d.due_date, d.id''', (selected,))
+    elif section=='Deadlines':
         for _, delivery in deliveries.iterrows():
             st.write(f"**{delivery['title']}** · {delivery['status']} · {date_text(delivery['due_date'])}")
             st.caption(delivery['engagement'])
-    with completed:
+            if st.button('Åbn leverance',key=f"deadline_open_{delivery['id']}"):
+                open_activity(dict(delivery,kind='Leverancefrist'))
+                st.rerun()
+    elif section=='Afsluttet':
         for _, done in q("SELECT * FROM engagements WHERE track_id=? AND status IN ('Afsluttet','Annulleret')", (selected,)).iterrows():
             st.write(f"**{done['title']}** · {done['status']} · {date_text(done['completed_at'])}")
             st.write(done['outcome_notes'] or '')

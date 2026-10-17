@@ -577,12 +577,27 @@ def migration_005_agreement_details(conn):
         BEGIN SELECT RAISE(ABORT, 'Accepteret tilbud kræver en logget korrektion'); END""")
 
 
+def migration_006_agreement_acceptance(conn):
+    import json
+    add_column_if_missing(conn,'engagements','accepted_proposal_snapshot',"TEXT DEFAULT ''")
+    add_column_if_missing(conn,'engagements','agreement_baseline',"TEXT DEFAULT ''")
+    add_column_if_missing(conn,'engagements','agreement_revision','INTEGER DEFAULT 0')
+    add_column_if_missing(conn,'engagement_amendments','status',"TEXT DEFAULT 'Historisk registreret'")
+    add_column_if_missing(conn,'engagement_amendments','proposed_terms',"TEXT DEFAULT '{}'")
+    add_column_if_missing(conn,'engagement_amendments','baseline_revision','INTEGER DEFAULT 0')
+    add_column_if_missing(conn,'engagement_amendments','accepted_at',"TEXT DEFAULT ''")
+    for row in conn.execute('SELECT * FROM engagements').fetchall():
+        conn.execute('UPDATE engagements SET agreement_baseline=? WHERE id=?',
+            (json.dumps(dict(row),ensure_ascii=False),row['id']))
+
+
 MIGRATIONS = (
     (1, "core_schema", migration_001_core_schema),
     (2, "briefings", migration_002_briefings),
     (3, "followups", migration_003_followups),
     (4, "business_module", migration_004_business_module),
     (5, "agreement_details", migration_005_agreement_details),
+    (6, "agreement_acceptance", migration_006_agreement_acceptance),
 )
 
 
@@ -633,7 +648,7 @@ def init_db():
     if APP_MODE == "production" and any(m[0] >= 5 for m in pending_migrations(DB_PATH)):
         from runtime_config import RuntimeConfigurationError
         raise RuntimeConfigurationError(
-            "Etape 4 afventer godkendelse til drift. Brug udviklingsstarten eller den tidligere driftversion."
+            "Udviklingsversionen afventer godkendelse til drift. Brug udviklingsstarten eller den tidligere driftversion."
         )
     ensure_data_dir()
     existing_database = DB_PATH.exists()

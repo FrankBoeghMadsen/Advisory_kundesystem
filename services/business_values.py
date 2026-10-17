@@ -1,6 +1,7 @@
 import math
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, InvalidOperation
 
 
@@ -10,8 +11,14 @@ def clean(value, fallback=None):
     return value
 
 
-def parse_danish_number(text):
-    text = str(text or '').strip().replace('\u00a0', '').replace(' ', '')
+def parse_danish_number(text, allow_currency=False):
+    text = str(text if text is not None else '').strip()
+    if allow_currency:
+        original=text
+        text = re.sub(r'\s*(?:kr\.?|DKK)\s*$', '', text, flags=re.IGNORECASE).strip()
+        if original and not text:
+            raise ValueError('Angiv et beløb før valutaendelsen.')
+    text = text.replace('\u00a0', '').replace(' ', '')
     if not text:
         return None
     if not re.fullmatch(r'(?:\d+|\d{1,3}(?:\.\d{3})+)(?:,\d{1,2})?', text):
@@ -60,3 +67,12 @@ def iso_date(value):
     if isinstance(value, str):
         return value
     return value.isoformat() if value else ''
+
+
+def timestamp_text(value):
+    if not value:
+        return ''
+    parsed=datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed=parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(ZoneInfo('Europe/Copenhagen')).strftime('%d-%m-%Y kl. %H:%M')

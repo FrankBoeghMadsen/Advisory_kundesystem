@@ -1,4 +1,5 @@
 from contextlib import closing
+from datetime import datetime, timedelta
 import json
 
 from db import connect, utc_now_iso
@@ -82,6 +83,8 @@ def create_engagement_from_proposal(
             snapshot.pop('original_agreement', None)
             conn.execute("UPDATE engagements SET original_agreement=? WHERE id=?",
                          (json.dumps(snapshot, ensure_ascii=False), cursor.lastrowid))
+            conn.execute('UPDATE engagements SET accepted_proposal_snapshot=? WHERE id=?',
+                         (json.dumps(dict(proposal,status='Accepteret'),ensure_ascii=False),cursor.lastrowid))
             conn.commit()
             return int(cursor.lastrowid)
         except Exception:
@@ -104,6 +107,8 @@ EDIT_FIELDS = {
                      'status', 'completed_at', 'responsible_note'},
 }
 
+AGREEMENT_FIELDS = {'fee_model','agreed_fee_ex_vat','fee_note','max_hours','fee_cap_ex_vat','included_hours'}
+
 
 def save_business_record(table, values, record_id=None, correction_reason=''):
     if table not in EDIT_FIELDS or set(values) - EDIT_FIELDS[table]:
@@ -122,7 +127,14 @@ def save_business_record(table, values, record_id=None, correction_reason=''):
             old = conn.execute(f'SELECT * FROM {table} WHERE id=?', (record_id,)).fetchone() if record_id else None
             if record_id and old is None:
                 raise ValueError('Posten findes ikke længere.')
+            if table=='engagements' and old and any(k in values and values[k]!=old[k] for k in AGREEMENT_FIELDS):
+                raise ValueError('Aftalte honorarvilkår skal ændres gennem en accepteret aftaleændring.')
             if table == 'proposals' and old and old['status'] == 'Accepteret':
+                if now <= (old['updated_at'] or ''):
+                    try:
+                        now=(datetime.fromisoformat(old['updated_at'])+timedelta(microseconds=1)).isoformat()
+                    except ValueError:
+                        pass
                 if not correction_reason.strip():
                     raise ValueError('Accepterede tilbud kræver en begrundet korrektion.')
                 if values.get('status') != 'Accepteret' or values.get('track_id', old['track_id']) != old['track_id']:
@@ -156,7 +168,8 @@ def save_business_record(table, values, record_id=None, correction_reason=''):
             raise
 
 
-def record_amendment(engagement_id, amendment_date, description, acceptance_reference, new_fee=None):
+def record_amendment(engagement_id, amendment_date, description, acceptance_reference, new_fee=None,
+                     status='Foreslået', terms=None):
     if not description.strip():
         raise ValueError('Beskriv aftaleændringen.')
     with closing(connect()) as conn:
@@ -167,18 +180,81 @@ def record_amendment(engagement_id, amendment_date, description, acceptance_refe
                 raise ValueError('Kundeopgaven findes ikke.')
             if new_fee is not None and new_fee < 0:
                 raise ValueError('Honoraret må ikke være negativt.')
-            conn.execute('''INSERT INTO engagement_amendments
-                (engagement_id, amendment_date, description, previous_fee, new_fee,
-                 acceptance_reference, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                (engagement_id, amendment_date, description.strip(), row['agreed_fee_ex_vat'],
-                 new_fee, acceptance_reference, utc_now_iso()))
+            changes = dict(terms or {})
+            if set(changes)-AGREEMENT_FIELDS or status not in ('Foreslået','Accepteret'):
+                raise ValueError('Ukendte aftalevilkår eller status.')
             if new_fee is not None:
-                conn.execute('UPDATE engagements SET agreed_fee_ex_vat=?, updated_at=? WHERE id=?',
-                             (new_fee, utc_now_iso(), engagement_id))
+                changes['agreed_fee_ex_vat']=new_fee
+            new_fee=changes.get('agreed_fee_ex_vat')
+            for key in ('agreed_fee_ex_vat','max_hours','fee_cap_ex_vat','included_hours'):
+                if changes.get(key) is not None and changes[key]<0:
+                    raise ValueError('Beløb og timer må ikke være negative.')
+            cursor=conn.execute('''INSERT INTO engagement_amendments
+                (engagement_id, amendment_date, description, previous_fee, new_fee,
+                 acceptance_reference, created_at, status, proposed_terms, baseline_revision)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Foreslået', ?, ?)''',
+                (engagement_id, amendment_date, description.strip(), row['agreed_fee_ex_vat'],
+                 new_fee, acceptance_reference, utc_now_iso(),json.dumps(changes,ensure_ascii=False),row['agreement_revision']))
+            if status=='Accepteret':
+                _accept_amendment(conn,cursor.lastrowid)
+            conn.commit()
+            return int(cursor.lastrowid)
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def _accept_amendment(conn, amendment_id):
+    amendment=conn.execute('SELECT * FROM engagement_amendments WHERE id=?',(amendment_id,)).fetchone()
+    if amendment is None or amendment['status']!='Foreslået':
+        raise ValueError('Ændringen er allerede behandlet eller findes ikke.')
+    engagement=conn.execute('SELECT * FROM engagements WHERE id=?',(amendment['engagement_id'],)).fetchone()
+    if amendment['baseline_revision']!=engagement['agreement_revision']:
+        raise ValueError('Aftalen er ændret siden forslaget. Opret et nyt forslag med det aktuelle udgangspunkt.')
+    changes=json.loads(amendment['proposed_terms'])
+    if set(changes)-AGREEMENT_FIELDS:
+        raise ValueError('Ukendte aftalevilkår.')
+    now=utc_now_iso()
+    if changes:
+        assignments=', '.join(f'{key}=?' for key in changes)
+        conn.execute(f'UPDATE engagements SET {assignments}, updated_at=?, agreement_revision=agreement_revision+1 WHERE id=?',
+                     (*changes.values(),now,engagement['id']))
+    else:
+        conn.execute('UPDATE engagements SET agreement_revision=agreement_revision+1,updated_at=? WHERE id=?',(now,engagement['id']))
+    conn.execute("UPDATE engagement_amendments SET status='Accepteret',accepted_at=?,previous_fee=? WHERE id=?",
+                 (now,engagement['agreed_fee_ex_vat'],amendment_id))
+
+
+def accept_amendment(amendment_id, reference=None):
+    with closing(connect()) as conn:
+        try:
+            conn.execute('BEGIN IMMEDIATE')
+            if reference is not None:
+                previous=conn.execute('SELECT acceptance_reference FROM engagement_amendments WHERE id=?',(amendment_id,)).fetchone()
+                if previous and previous[0] and reference and previous[0]!=reference:
+                    reference=previous[0]+'\n'+reference
+                conn.execute("UPDATE engagement_amendments SET acceptance_reference=? WHERE id=? AND status='Foreslået'",
+                             (reference,amendment_id))
+            _accept_amendment(conn,amendment_id)
             conn.commit()
         except Exception:
             conn.rollback()
             raise
+
+
+def document_legacy_acceptance(amendment_id, reference):
+    if not reference.strip():
+        raise ValueError('Angiv en kort reference til mail, møde eller mundtlig aftale.')
+    with closing(connect()) as conn:
+        previous=conn.execute('SELECT acceptance_reference FROM engagement_amendments WHERE id=?',(amendment_id,)).fetchone()
+        if previous and previous[0] and previous[0]!=reference.strip():
+            reference=previous[0]+'\n'+reference.strip()
+        cursor=conn.execute("""UPDATE engagement_amendments SET status='Historisk dokumenteret',
+            acceptance_reference=?,accepted_at=? WHERE id=? AND status='Historisk registreret'""",
+            (reference.strip(),utc_now_iso(),amendment_id))
+        if cursor.rowcount!=1:
+            raise ValueError('Den historiske ændring er allerede behandlet eller findes ikke.')
+        conn.commit()
 
 
 def set_track_meetings(track_id, meeting_ids):

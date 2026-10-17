@@ -15,6 +15,64 @@ PAGES = PAGE_OPTIONS
 
 
 class AppViewTests(unittest.TestCase):
+    def test_stage5_dashboard_targets_and_clickable_counts(self):
+        TEST_TEMP_ROOT.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='stage5-ui-',dir=TEST_TEMP_ROOT) as directory:
+            root=Path(directory)
+            env=os.environ.copy()
+            env['FRANK_MONITOR_MODE']='test'
+            env['FRANK_MONITOR_DATA_DIR']=str(root/'data')
+            env['FRANK_MONITOR_PRODUCTION_DATA_DIR']=str(root/'production')
+            runtime=root/'runtime'
+            runtime.mkdir()
+            env['TEMP']=env['TMP']=str(runtime)
+            script='''
+from streamlit.testing.v1 import AppTest
+from tests.stage4_fixture import populate
+from services.activity_service import dashboard_data
+from db import connect, utc_now_iso
+
+track,pid,eid=populate()
+conn=connect()
+conn.execute("UPDATE deliverables SET title='Juridisk vurderingsnotat om medicinsk cannabis', due_date='2026-10-24',priority='Høj'")
+actor=conn.execute('SELECT company_id FROM commercial_tracks WHERE id=?',(track,)).fetchone()[0]
+meeting=conn.execute("INSERT INTO meetings(company_id,title,meeting_date,raw_text,created_at) VALUES(?,'TEST Kundemøde','2026-10-24','TEST Referat',?)",(actor,utc_now_iso())).lastrowid
+followup=conn.execute("INSERT INTO followups(company_id,title,due_date,priority,status,created_at) VALUES(?,'TEST Lav prioritet','2026-10-24','Lav','Ny',?)",(actor,utc_now_iso())).lastrowid
+conn.commit()
+app=AppTest.from_file('app.py').run(timeout=30)
+assert not len(app.exception),list(app.exception)
+assert not any('Signalpåmindelse' in item.value or 'LinkedIn-referencekilder' in item.value for item in app.subheader)
+assert any('Juridisk vurderingsnotat' in item.value for item in app.markdown)
+app.session_state['business_search']='skjuler målet'
+app.button(key='activity_Leverancefrist_1').click().run()
+assert not len(app.exception),list(app.exception)
+assert app.radio(key='business_section').value=='Kundeopgaver'
+assert app.text_input(key=f'deliverable_{eid}_1_title').value=='Juridisk vurderingsnotat om medicinsk cannabis'
+assert app.session_state['business_focus']['id']==1
+assert not any(item.key==f'engagement_{track}_{eid}_direct_amount' for item in app.text_input)
+
+for label,rows in dashboard_data()['groups'].items():
+    view=AppTest.from_file('app.py').run(timeout=30)
+    assert view.button(key='kpi_'+label).label.endswith(str(len(rows)))
+    view.button(key='kpi_'+label).click().run()
+    assert not len(view.exception),list(view.exception)
+    assert any(f'{label} ({len(rows)})' in item.value for item in view.markdown)
+
+app=AppTest.from_file('app.py').run(timeout=30)
+app.button(key=f'activity_Møde_{meeting}').click().run()
+assert not len(app.exception),list(app.exception)
+assert app.text_area(key=f'meeting_page_raw_text_{meeting}').value=='TEST Referat'
+app=AppTest.from_file('app.py').run(timeout=30)
+app.button(key=f'activity_Opfølgning_{followup}').click().run()
+assert not len(app.exception),list(app.exception)
+assert any('TEST Lav prioritet' in item.value for item in app.markdown)
+conn.close()
+print('stage5-navigation=ok')
+'''
+            result=subprocess.run([sys.executable,'-c',script],cwd=ROOT,env=env,capture_output=True,text=True,timeout=90)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('stage5-navigation=ok',result.stdout)
+
     def test_stage4_interactive_fee_form_and_read_only_page(self):
         TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='stage4-ui-', dir=TEST_TEMP_ROOT) as directory:
@@ -23,6 +81,9 @@ class AppViewTests(unittest.TestCase):
             env['FRANK_MONITOR_MODE'] = 'test'
             env['FRANK_MONITOR_DATA_DIR'] = str(root / 'data')
             env['FRANK_MONITOR_PRODUCTION_DATA_DIR'] = str(root / 'production')
+            runtime=root/'runtime'
+            runtime.mkdir()
+            env['TEMP']=env['TMP']=str(runtime)
             script = '''
 from streamlit.testing.v1 import AppTest
 from tests.stage4_fixture import populate
@@ -38,6 +99,7 @@ assert not len(app.exception), list(app.exception)
 assert [tuple(row) for row in conn.execute('SELECT * FROM proposals ORDER BY id')] == before
 assert app.selectbox(key='track_new_company').value is None
 assert not any('honorar er angivet' in item.label for item in app.checkbox)
+app.radio(key='business_section').set_value('Tilbud').run()
 
 prefix = f'proposal_{track}_new'
 app.selectbox(key=prefix+'_model').select('Fast pris').run()
@@ -70,9 +132,11 @@ app.button(key=correction+'_save').click().run()
 assert not len(app.exception), list(app.exception)
 assert conn.execute('SELECT offered_fee_ex_vat FROM proposals WHERE id=?',(accepted,)).fetchone()[0] == 24000
 assert conn.execute('SELECT COUNT(*) FROM proposal_changes WHERE proposal_id=?',(accepted,)).fetchone()[0] == 1
+app.radio(key='business_section').set_value('Kundeopgaver').run()
 app.text_area(key=f'amendment_desc_{engagement}').set_value('Syntetisk udvidelse')
 app.text_input(key=f'amendment_fee_{engagement}').set_value('27.000')
 app.text_input(key=f'amendment_ref_{engagement}').set_value('TEST accept')
+app.radio(key=f'amendment_status_{engagement}').set_value('Accepteret')
 app.button(key=f'amendment_save_{engagement}').click().run()
 assert not len(app.exception), list(app.exception)
 assert conn.execute('SELECT agreed_fee_ex_vat FROM engagements WHERE id=?',(engagement,)).fetchone()[0] == 27000

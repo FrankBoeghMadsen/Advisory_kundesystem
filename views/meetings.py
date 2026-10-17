@@ -14,6 +14,11 @@ from app_context import (
 
 
 def render():
+    focus=st.session_state.get('record_focus',{})
+    focused_id=focus.get('id') if focus.get('page')=='Møder' else None
+    if focused_id and st.button('Vis alle møder'):
+        st.session_state.pop('record_focus',None)
+        st.rerun()
     st.subheader("Møder")
     today_iso = date.today().isoformat()
     st.caption("Samlet overblik over kommende og tidligere møder på tværs af aktører.")
@@ -188,10 +193,12 @@ def render():
             ).str.lower()
             shown = shown[searchable.str.contains(needle, regex=False)]
 
+        if focused_id:
+            shown=df[df['id']==focused_id]
         table_df = shown.drop(columns=["id", "company_id", "referattekst"])
         st.markdown(f"### Viste møder ({len(shown)})")
         st.dataframe(table_df, use_container_width=True, hide_index=True)
-        with st.expander("Åbn referat / mødedetaljer", expanded=False):
+        with st.expander("Åbn referat / mødedetaljer", expanded=bool(focused_id)):
             options = []
             for _, row in shown.iterrows():
                 label = f"{display_date(row['dato'])} - {row['virksomhed']} - {row['titel']}"

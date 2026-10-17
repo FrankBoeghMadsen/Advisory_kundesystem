@@ -5,6 +5,7 @@ from db import DATA_DIR, init_db
 from monitor import run_monitor
 from runtime_config import APP_MODE, RuntimeConfigurationError, mode_label
 from views import render_page
+from ui.navigation import render_navigation
 
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
@@ -23,6 +24,7 @@ div.stButton > button { min-height: 2.35rem; font-size: 0.95rem; }
 .company-row { border-bottom: 1px solid #eee; padding: 0.15rem 0; }
 h1 { font-size: 2rem !important; letter-spacing: 0 !important; }
 h2, h3 { letter-spacing: 0 !important; }
+[data-testid="stRadio"] label:has(input:checked) { background: #e3efec; border-bottom: 3px solid #24776b; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -40,11 +42,8 @@ with st.sidebar:
         st.warning("UDVIKLINGSDATABASE")
     st.caption(f"Tilstand: {mode_label()}")
     st.caption(f"Data: {DATA_DIR}")
-    chosen = st.radio("Vælg visning", PAGE_OPTIONS, index=PAGE_OPTIONS.index(st.session_state["page"]))
-    if chosen != st.session_state["page"]:
-        st.session_state["page"] = chosen
-        st.rerun()
-    if st.button("Kør overvågning nu", type="primary"):
+    render_navigation()
+    if st.session_state['page'] in ['Signalindbakke','Kilder','Triggerregler','Briefing'] and st.button("Kør overvågning nu"):
         with st.spinner("Overvåger kilder..."):
             result = run_monitor()
         st.success(f"Færdig. Fund indsamlet: {result['collected']}. Relevante signaler: {result['relevant']}.")

@@ -87,6 +87,9 @@ class Stage4Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.convert(pid)
         before = self.row('proposals',pid)
+        with self.assertRaises(ValueError):
+            save_business_record('engagements',dict(title='Udvidet opgave',agreed_fee_ex_vat=28000),eid)
+        record_amendment(eid,'','Udvidelse','Mail',28000,status='Accepteret')
         save_business_record('engagements',dict(title='Udvidet opgave',description='Ændret beskrivelse',
             agreed_fee_ex_vat=28000, actual_hours=17.5, reuse_potential='Ja', reuse_notes='Genbrugbar metode'),eid)
         self.assertEqual(self.row('proposals',pid),before)
@@ -99,7 +102,7 @@ class Stage4Tests(unittest.TestCase):
 
     def test_amendment_and_direct_engagement_snapshot(self):
         eid = save_business_record('engagements',dict(track_id=self.track,title='Direkte aftale',agreed_fee_ex_vat=5000))
-        record_amendment(eid,'2026-10-18','Udvidet leverance','Mail 18-10-2026',6000)
+        record_amendment(eid,'2026-10-18','Udvidet leverance','Mail 18-10-2026',6000,status='Accepteret')
         row = self.row('engagements',eid)
         self.assertEqual(row['agreed_fee_ex_vat'],6000)
         self.assertEqual(json.loads(row['original_agreement'])['agreed_fee_ex_vat'],5000)

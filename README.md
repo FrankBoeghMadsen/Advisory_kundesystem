@@ -1,8 +1,8 @@
 # FBM Advisory Dashboard
 
-Aktuel udviklingsversion: 3.0. Se [ETAPE_4_BRUGEROPLEVELSE.md](ETAPE_4_BRUGEROPLEVELSE.md) for honorarregistrering, aftalebeskyttelse, migration og testresultater.
+Aktuel udviklingsversion: 3.0. Se [ETAPE_5_IMPLEMENTERING.md](ETAPE_5_IMPLEMENTERING.md) for det daglige aktivitetsoverblik, navigation, aftalehistorik, testresultater og praktisk prøvevejledning.
 
-Etape 4 er endnu ikke frigivet til drift. Den aktuelle kode afprøves med `Start Monitor Development.bat`; produktionstilstand stopper, hvis etape 4-migrationen afventer. Den aktive database opgraderes først efter særskilt godkendelse.
+Udviklingsversionen er endnu ikke frigivet til drift. Den aktuelle kode afprøves med `Start Monitor Development.bat`; produktionstilstand stopper, hvis udviklingsmigrationerne afventer. Den aktive database opgraderes først efter særskilt godkendelse.
 
 En første fungerende MVP som lokal Streamlit-webapp til passiv overvågning af danske life science-virksomheder.
 

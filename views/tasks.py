@@ -17,8 +17,12 @@ from app_context import (
 
 def render():
     today_iso = date.today().isoformat()
-    st.subheader("Opgaver / leads")
-    st.caption("Samlet arbejdsbord for åbne opgaver, leads, kundeforløb og mødeopfølgninger.")
+    st.subheader("Opfølgninger")
+    focus=st.session_state.get('record_focus',{})
+    focused_id=focus.get('id') if focus.get('page')=='Opgaver' else None
+    if focused_id and st.button('Vis alle opfølgninger'):
+        st.session_state.pop('record_focus',None)
+        st.rerun()
 
     companies = q("SELECT id, name FROM companies ORDER BY name")
     company_names = companies["name"].tolist() if len(companies) else []
@@ -113,7 +117,9 @@ def render():
             ).str.lower()
             shown = shown[searchable.str.contains(needle, regex=False)]
 
-        st.markdown(f"### Viste opgaver ({len(shown)})")
+        if focused_id:
+            shown=followups[followups['id']==focused_id]
+        st.markdown(f"### Viste opfølgninger ({len(shown)})")
         if len(shown):
             for _, task in shown.iterrows():
                 task_id = int(task["id"])
