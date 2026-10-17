@@ -40,6 +40,15 @@ class SafetyGuardTests(unittest.TestCase):
         launcher = (ROOT / "Start Monitor.bat").read_text(encoding="utf-8")
         self.assertIn("--server.address 127.0.0.1", launcher)
         self.assertNotIn("--server.address 0.0.0.0", launcher)
+        self.assertIn("FRANK_MONITOR_MODE=production", launcher)
+        self.assertIn("FRANK_MONITOR_DATA_DIR=%USERPROFILE%\\FrankAdvisoryMonitorData", launcher)
+
+    def test_development_launcher_uses_isolated_data_and_loopback(self):
+        launcher = (ROOT / "Start Monitor Development.bat").read_text(encoding="utf-8")
+        self.assertIn("FRANK_MONITOR_MODE=development", launcher)
+        self.assertIn("FRANK_MONITOR_DATA_DIR=%~dp0.dev-data", launcher)
+        self.assertIn("--server.address 127.0.0.1", launcher)
+        self.assertNotIn("--server.address 0.0.0.0", launcher)
 
 
 if __name__ == "__main__":

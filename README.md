@@ -9,18 +9,17 @@ En første fungerende MVP som lokal Streamlit-webapp til passiv overvågning af 
 - Score fund som Lav/Middel/Høj/Kritisk
 - Markere myndighedsreaktioner og andre relevante signaler
 - Vise dashboard, signalindbakke, virksomhedsprofiler og noter
+- Håndtere forretningsforløb, tilbud, kundeopgaver, leverancer og deadlines
 - Eksportere signaler til CSV
 - Bruge OpenAI til opsummering/scoring, hvis `OPENAI_API_KEY` sættes og den konkrete overførsel godkendes; ellers bruges lokal eller regelbaseret analyse
 
 ## Kom hurtigt i gang
 
-```bash
-cd frank_advisory_monitor_v2_4
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-streamlit run app.py --server.address 127.0.0.1
-```
+På Windows startes den aktive version med `Start Monitor.bat`. Startfilen vælger eksplicit driftstilstand, den aktive datamappe og lokal binding til `127.0.0.1`.
+
+Udviklingsversionen startes kun med `Start Monitor Development.bat`. Den bruger den isolerede, Git-ignorerede mappe `.dev-data` og port 8502.
+
+Direkte `streamlit run app.py` uden en eksplicit driftstilstand stopper af sikkerhedshensyn, før en database åbnes.
 
 Første gang appen startes, oprettes en lokal SQLite-database med virksomhederne fra masterlisten.
 
@@ -43,6 +42,12 @@ Den aktive database ligger i:
 %USERPROFILE%\FrankAdvisoryMonitorData\monitor.db
 ```
 
+Programmet har en fail-closed databaseafskærmning:
+
+- Drift må kun skrive i den aktive datamappe.
+- Udvikling og test afvises, hvis de peger på den aktive datamappe eller en undermappe i den.
+- Automatiske tests bruger altid midlertidige databaser under projektets testområde.
+
 Ved en ny databasemigration oprettes først en verificeret backup i `Backups`. `Backup database.bat` opretter en særskilt tidsstemplet manuel backup og overskriver ikke tidligere filer.
 
 Databasekontrol og en isoleret gendannelsestest kan køres med:
@@ -61,12 +66,16 @@ Brugerfladen er opdelt uden ændring af navigationen:
 - `app.py`: opstart, fælles layout og navigation.
 - `views/`: én renderfunktion pr. eksisterende visning.
 - `services/`: AI, aktør-/briefinglogik og lokal dokumentlagring.
+- `services/business_service.py`: kontrollerede overgange og koblinger i forretningsmodulet.
 - `repositories.py`: fælles gateway til databaseforespørgsler og skrivehandlinger.
 - `ui/`: formatering og navigationstilstand.
 - `app_config.py`: fælles navne, sidemenuer og statuslister.
 - `db.py`: skema, migrationer, backup og lavniveau-databaseadgang.
+- `runtime_config.py`: fail-closed valg af drift, udvikling og testdatabase.
 
 Se [ETAPE_2_MODULOPDELING.md](ETAPE_2_MODULOPDELING.md) for flyttede kodeområder, regressionstest og kendte afgrænsninger.
+
+Se [ETAPE_3_FORRETNINGSMODUL_DESIGN.md](ETAPE_3_FORRETNINGSMODUL_DESIGN.md) og [ETAPE_3_IMPLEMENTERING.md](ETAPE_3_IMPLEMENTERING.md) for datamodel, databaseisolering, arbejdsgange og testresultater for forretningsmodulet.
 
 ## Bemærk
 Denne MVP bruger kun konfigurerbare offentlige feeds/web-kilder. LinkedIn er ikke automatiseret.

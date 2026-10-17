@@ -8,7 +8,14 @@ import shutil
 import tempfile
 from contextlib import closing
 
-DATA_DIR = Path(os.environ.get("FRANK_MONITOR_DATA_DIR", Path.home() / "FrankAdvisoryMonitorData"))
+from runtime_config import (
+    APP_MODE,
+    DATA_DIR,
+    PRODUCTION_DATA_DIR,
+    validate_data_configuration,
+    validate_database_write_path,
+)
+
 DB_PATH = DATA_DIR / "monitor.db"
 UPLOAD_DIR = DATA_DIR / "UploadedDocuments"
 
@@ -244,17 +251,20 @@ CREATE TABLE IF NOT EXISTS followups (
 """
 
 def ensure_data_dir():
+    validate_data_configuration(APP_MODE, DATA_DIR, PRODUCTION_DATA_DIR)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "Backups").mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     old_local = Path("data/monitor.db")
-    if not DB_PATH.exists() and old_local.exists():
+    if APP_MODE == "production" and not DB_PATH.exists() and old_local.exists():
         shutil.copy2(old_local, DB_PATH)
 
 def connect(db_path=None):
     path = Path(db_path) if db_path else DB_PATH
     if db_path is None:
+        validate_data_configuration(APP_MODE, DATA_DIR, PRODUCTION_DATA_DIR)
         ensure_data_dir()
+    validate_database_write_path(path, APP_MODE, PRODUCTION_DATA_DIR)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")
@@ -339,6 +349,7 @@ def backup_db_if_needed():
 
 def restore_test(backup_path):
     """Prove that a backup can be restored and opened, without touching live data."""
+    validate_data_configuration(APP_MODE, DATA_DIR, PRODUCTION_DATA_DIR)
     backup = Path(backup_path)
     restore_root = DATA_DIR / "RestoreTests"
     restore_root.mkdir(parents=True, exist_ok=True)
@@ -417,10 +428,128 @@ def migration_003_followups(conn):
     conn.execute("UPDATE followups SET followup_type='Opfølgning' WHERE followup_type IS NULL OR followup_type=''")
 
 
+def migration_004_business_module(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS commercial_tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            primary_contact_id INTEGER,
+            title TEXT NOT NULL,
+            need_description TEXT DEFAULT '',
+            service_area TEXT DEFAULT '',
+            status TEXT DEFAULT 'Åben',
+            expected_decision_date TEXT DEFAULT '',
+            close_reason TEXT DEFAULT '',
+            closed_at TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT DEFAULT '',
+            FOREIGN KEY(company_id) REFERENCES companies(id),
+            FOREIGN KEY(primary_contact_id) REFERENCES contacts(id)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS proposals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            version INTEGER DEFAULT 1,
+            scope TEXT DEFAULT '',
+            deliverables_summary TEXT DEFAULT '',
+            assumptions TEXT DEFAULT '',
+            fee_model TEXT DEFAULT 'Endnu ikke aftalt',
+            offered_fee_ex_vat NUMERIC,
+            fee_note TEXT DEFAULT '',
+            status TEXT DEFAULT 'Kladde',
+            sent_date TEXT DEFAULT '',
+            valid_until TEXT DEFAULT '',
+            document_reference TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT DEFAULT '',
+            FOREIGN KEY(track_id) REFERENCES commercial_tracks(id),
+            UNIQUE(track_id, version)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS engagements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            accepted_proposal_id INTEGER,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            fee_model TEXT DEFAULT 'Endnu ikke aftalt',
+            agreed_fee_ex_vat NUMERIC,
+            fee_note TEXT DEFAULT '',
+            status TEXT DEFAULT 'Planlagt',
+            start_date TEXT DEFAULT '',
+            target_end_date TEXT DEFAULT '',
+            completed_at TEXT DEFAULT '',
+            outcome_notes TEXT DEFAULT '',
+            future_collaboration_note TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT DEFAULT '',
+            FOREIGN KEY(track_id) REFERENCES commercial_tracks(id),
+            FOREIGN KEY(accepted_proposal_id) REFERENCES proposals(id)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS deliverables (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            engagement_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            due_date TEXT DEFAULT '',
+            priority TEXT DEFAULT 'Middel',
+            status TEXT DEFAULT 'Ikke startet',
+            completed_at TEXT DEFAULT '',
+            responsible_note TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT DEFAULT '',
+            FOREIGN KEY(engagement_id) REFERENCES engagements(id)
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS meeting_tracks (
+            meeting_id INTEGER NOT NULL,
+            track_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY(meeting_id, track_id),
+            FOREIGN KEY(meeting_id) REFERENCES meetings(id),
+            FOREIGN KEY(track_id) REFERENCES commercial_tracks(id)
+        )"""
+    )
+    add_column_if_missing(
+        conn, "followups", "commercial_track_id", "INTEGER REFERENCES commercial_tracks(id)"
+    )
+    add_column_if_missing(
+        conn, "followups", "deliverable_id", "INTEGER REFERENCES deliverables(id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_commercial_tracks_company ON commercial_tracks(company_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_proposals_track ON proposals(track_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_engagements_track ON engagements(track_id)"
+    )
+    conn.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_engagements_accepted_proposal
+           ON engagements(accepted_proposal_id)
+           WHERE accepted_proposal_id IS NOT NULL"""
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_deliverables_engagement ON deliverables(engagement_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_followups_commercial_track ON followups(commercial_track_id)"
+    )
+
+
 MIGRATIONS = (
     (1, "core_schema", migration_001_core_schema),
     (2, "briefings", migration_002_briefings),
     (3, "followups", migration_003_followups),
+    (4, "business_module", migration_004_business_module),
 )
 
 
@@ -467,6 +596,7 @@ def migrate_db(conn):
 
 
 def init_db():
+    validate_data_configuration(APP_MODE, DATA_DIR, PRODUCTION_DATA_DIR)
     ensure_data_dir()
     existing_database = DB_PATH.exists()
     migrations = pending_migrations(DB_PATH)

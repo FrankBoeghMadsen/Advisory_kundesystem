@@ -60,6 +60,23 @@ def render():
     cols[3].metric("Nye signaler", new_signal_count)
     cols[4].metric("Opgaver/leads", len(followups))
 
+    business_counts = q(
+        """SELECT
+             (SELECT COUNT(*) FROM commercial_tracks WHERE status!='Lukket') AS open_tracks,
+             (SELECT COUNT(*) FROM proposals WHERE status IN ('Sendt','Afventer')) AS pending_proposals,
+             (SELECT COUNT(*) FROM engagements WHERE status IN ('Planlagt','I gang','Afventer')) AS active_engagements,
+             (SELECT COUNT(*) FROM deliverables WHERE status NOT IN ('Leveret','Annulleret')) AS open_deliverables"""
+    ).iloc[0]
+    st.markdown("### Forretning")
+    business_cols = st.columns(5)
+    business_cols[0].metric("Åbne forløb", int(business_counts["open_tracks"]))
+    business_cols[1].metric("Tilbud afventer", int(business_counts["pending_proposals"]))
+    business_cols[2].metric("Aktive kundeopgaver", int(business_counts["active_engagements"]))
+    business_cols[3].metric("Åbne leverancer", int(business_counts["open_deliverables"]))
+    if business_cols[4].button("Åbn Forretning", type="primary", use_container_width=True):
+        set_page("Forretning")
+        st.rerun()
+
     c1, c2 = st.columns(2)
     with c1:
         st.subheader(f"Dashboard · {display_date(date.today().isoformat())}")

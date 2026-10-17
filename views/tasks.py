@@ -50,8 +50,12 @@ def render():
                 st.success("Opgave gemt.")
                 st.rerun()
 
-    followups = q("""SELECT f.*, c.name AS company
-                     FROM followups f LEFT JOIN companies c ON c.id=f.company_id
+    followups = q("""SELECT f.*, c.name AS company, t.title AS commercial_track,
+                            d.title AS deliverable
+                     FROM followups f
+                     LEFT JOIN companies c ON c.id=f.company_id
+                     LEFT JOIN commercial_tracks t ON t.id=f.commercial_track_id
+                     LEFT JOIN deliverables d ON d.id=f.deliverable_id
                      ORDER BY
                         CASE COALESCE(f.status,'Ny') WHEN 'Lukket' THEN 2 WHEN 'Arkiveret' THEN 3 ELSE 1 END,
                         CASE f.priority WHEN 'Høj' THEN 1 WHEN 'Middel' THEN 2 ELSE 3 END,
@@ -120,6 +124,11 @@ def render():
                     top_a, top_b = st.columns([4, 1])
                     top_a.markdown(f"**{title}**")
                     top_a.caption(f"{company} · {due} · {task['followup_type']} · {task['priority']} · {task['status']}")
+                    if task["commercial_track"]:
+                        context = f"Forløb: {task['commercial_track']}"
+                        if task["deliverable"]:
+                            context += f" · Leverance: {task['deliverable']}"
+                        top_a.caption(context)
                     if top_b.button("Åbn profil", key=f"tasks_open_profile_{task_id}", disabled=not has_db_id(task["company_id"])):
                         open_followup(int(task["company_id"]), task_id)
                         st.rerun()

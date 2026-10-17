@@ -136,10 +136,12 @@ def render():
             mem_n = count_for("intelligence_memory", company_id)
             brief_n = count_for("briefings", company_id)
             follow_n = count_for("followups", company_id)
+            business_n = count_for("commercial_tracks", company_id)
             timeline_n = sig_n + meet_n + obs_n + case_n + note_n + mem_n + brief_n + follow_n
 
             section_counts = {
                 "Tidslinje": timeline_n,
+                "Forretning": business_n,
                 "Opfølgning": follow_n,
                 "Signaler": sig_n,
                 "Møder": meet_n,
@@ -150,7 +152,7 @@ def render():
                 "Videnbank": mem_n,
                 "Briefing": brief_n,
             }
-            sections = ["Tidslinje", "Opfølgning", "Signaler", "Møder", "Observationer", "Historik / Sager", "Kontakter", "Noter", "Videnbank", "Briefing"]
+            sections = ["Tidslinje", "Forretning", "Opfølgning", "Signaler", "Møder", "Observationer", "Historik / Sager", "Kontakter", "Noter", "Videnbank", "Briefing"]
             section_key = f"profile_section_{company_id}"
             if st.session_state.get(section_key) not in sections:
                 st.session_state[section_key] = "Tidslinje"
@@ -208,6 +210,36 @@ def render():
                                             )
                 else:
                     st.info("Ingen tidslinjeelementer endnu.")
+
+            elif section_base == "Forretning":
+                st.markdown("### Forretningsforløb")
+                business_tracks = q(
+                    """SELECT t.*,
+                              (SELECT COUNT(*) FROM proposals p WHERE p.track_id=t.id) AS proposal_count,
+                              (SELECT COUNT(*) FROM engagements e WHERE e.track_id=t.id) AS engagement_count
+                       FROM commercial_tracks t WHERE t.company_id=?
+                       ORDER BY CASE t.status WHEN 'Åben' THEN 1 WHEN 'Afventer' THEN 2
+                                WHEN 'Pauset' THEN 3 ELSE 4 END,
+                                t.expected_decision_date, t.created_at DESC""",
+                    (company_id,),
+                )
+                if len(business_tracks):
+                    for _, track in business_tracks.iterrows():
+                        st.markdown(f"**{track['title']}**")
+                        st.caption(
+                            f"{track['status']} · {int(track['proposal_count'])} tilbud · "
+                            f"{int(track['engagement_count'])} kundeopgaver"
+                            + (f" · Beslutning: {track['expected_decision_date']}" if track['expected_decision_date'] else "")
+                        )
+                        if track["need_description"]:
+                            st.write(short(track["need_description"], 240))
+                        st.divider()
+                else:
+                    st.info("Aktøren har ingen forretningsforløb. Relationer og møder er ikke automatisk salgsmuligheder.")
+                if st.button("Åbn i Forretning", type="primary", key=f"open_business_{company_id}"):
+                    st.session_state["business_company_id"] = company_id
+                    st.session_state["page"] = "Forretning"
+                    st.rerun()
 
             elif section_base == "Opfølgning":
                 st.markdown("### Opfølgninger / leads / opgaver")

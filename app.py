@@ -3,11 +3,17 @@ import streamlit as st
 from app_config import APP_CAPTION, APP_TITLE, PAGE_OPTIONS
 from db import DATA_DIR, init_db
 from monitor import run_monitor
+from runtime_config import APP_MODE, RuntimeConfigurationError, mode_label
 from views import render_page
 
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
-init_db()
+try:
+    init_db()
+except RuntimeConfigurationError as exc:
+    st.error(f"Sikkerhedsstop: {exc}")
+    st.info("Start programmet via den almindelige startfil eller den særskilte udviklingsstart.")
+    st.stop()
 
 st.markdown("""
 <style>
@@ -27,6 +33,9 @@ st.title(APP_TITLE)
 st.caption(APP_CAPTION)
 
 with st.sidebar:
+    if APP_MODE == "development":
+        st.warning("UDVIKLINGSDATABASE")
+    st.caption(f"Tilstand: {mode_label()}")
     st.caption(f"Data: {DATA_DIR}")
     chosen = st.radio("Vælg visning", PAGE_OPTIONS, index=PAGE_OPTIONS.index(st.session_state["page"]))
     if chosen != st.session_state["page"]:

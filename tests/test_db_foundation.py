@@ -22,8 +22,11 @@ def isolated_database():
         prefix="frank-monitor-test-", dir=TEST_TEMP_ROOT
     ) as temp_dir:
         data_dir = Path(temp_dir)
+        production_dir = data_dir / "production-must-not-be-used"
         with (
+            patch.object(db, "APP_MODE", "test"),
             patch.object(db, "DATA_DIR", data_dir),
+            patch.object(db, "PRODUCTION_DATA_DIR", production_dir),
             patch.object(db, "DB_PATH", data_dir / "monitor.db"),
             patch.object(db, "UPLOAD_DIR", data_dir / "UploadedDocuments"),
         ):
@@ -35,12 +38,17 @@ class DatabaseFoundationTests(unittest.TestCase):
         with isolated_database() as data_dir:
             db.init_db()
 
-            self.assertEqual(db.applied_migration_versions(db.DB_PATH), {1, 2, 3})
+            self.assertEqual(db.applied_migration_versions(db.DB_PATH), {1, 2, 3, 4})
             result = db.verify_database(db.DB_PATH)
             self.assertEqual(result["integrity"], "ok")
             self.assertEqual(result["foreign_key_violations"], 0)
             self.assertIn("companies", result["tables"])
             self.assertIn("followups", result["tables"])
+            self.assertIn("commercial_tracks", result["tables"])
+            self.assertIn("proposals", result["tables"])
+            self.assertIn("engagements", result["tables"])
+            self.assertIn("deliverables", result["tables"])
+            self.assertIn("meeting_tracks", result["tables"])
             self.assertFalse(list((data_dir / "Backups").glob("*pre_migration*")))
 
     def test_existing_database_is_backed_up_before_migration_and_keeps_data(self):
@@ -77,7 +85,7 @@ class DatabaseFoundationTests(unittest.TestCase):
                     ("Bevaret aktør",),
                 ).fetchone()
                 self.assertEqual(tuple(row), ("Bevaret aktør", "Life science-virksomhed", "Aktiv"))
-            self.assertEqual(db.applied_migration_versions(db.DB_PATH), {1, 2, 3})
+            self.assertEqual(db.applied_migration_versions(db.DB_PATH), {1, 2, 3, 4})
 
     def test_backup_can_be_restored_and_verified_without_touching_source(self):
         with isolated_database():

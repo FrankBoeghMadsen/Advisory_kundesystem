@@ -38,11 +38,11 @@ python -m pip install -r requirements.txt
 
 ## 5. Start appen
 
-```powershell
-streamlit run app.py --server.address 127.0.0.1
-```
+Start den aktive version med `Start Monitor.bat`. Startfilen vælger eksplicit produktionstilstand, den aktive datamappe og lokal netværksbinding.
 
-Du kan også bruge `Start Monitor.bat`. Den binder som standard kun appen til `127.0.0.1`, så andre enheder på netværket ikke kan åbne den.
+Start udviklingsversionen med `Start Monitor Development.bat`. Den bruger `.dev-data` og kan ikke skrive til den aktive database.
+
+Begge startfiler binder kun appen til `127.0.0.1`, så andre enheder på netværket ikke kan åbne den. Direkte `streamlit run app.py` uden eksplicit datatilstand stoppes af sikkerhedshensyn.
 
 ## Opdater dependencies
 
@@ -65,6 +65,9 @@ En database kan kontrolleres uden at ændre den:
 En backup kan prøvegengendannes i en midlertidig mappe uden at ændre den aktive database:
 
 ```powershell
+$env:FRANK_MONITOR_MODE = "production"
+$env:FRANK_MONITOR_PRODUCTION_DATA_DIR = "$env:USERPROFILE\FrankAdvisoryMonitorData"
+$env:FRANK_MONITOR_DATA_DIR = "$env:USERPROFILE\FrankAdvisoryMonitorData"
 .\.venv\Scripts\python.exe db_maintenance.py restore-check "C:\sti\til\backup.db"
 ```
 

@@ -5,6 +5,10 @@ cd /d "%~dp0"
 echo Starter Frank Advisory Intelligence Monitor...
 echo Data gemmes i: %USERPROFILE%\FrankAdvisoryMonitorData
 echo.
+
+set "FRANK_MONITOR_MODE=production"
+set "FRANK_MONITOR_PRODUCTION_DATA_DIR=%USERPROFILE%\FrankAdvisoryMonitorData"
+set "FRANK_MONITOR_DATA_DIR=%USERPROFILE%\FrankAdvisoryMonitorData"
 echo Lokal adresse: http://127.0.0.1:8501
 echo.
 

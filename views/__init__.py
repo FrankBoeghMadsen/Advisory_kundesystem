@@ -1,4 +1,5 @@
 from views.briefing import render as render_briefing
+from views.business import render as render_business
 from views.companies import render as render_companies
 from views.contacts import render as render_contacts
 from views.dashboard import render as render_dashboard
@@ -13,6 +14,7 @@ from views.trigger_rules import render as render_trigger_rules
 
 VIEW_RENDERERS = {
     "Dashboard": render_dashboard,
+    "Forretning": render_business,
     "Opgaver": render_tasks,
     "Signalindbakke": render_signals,
     "Virksomheder": render_companies,
