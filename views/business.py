@@ -444,6 +444,14 @@ def render():
     if st.session_state.get('business_listing'):
         _render_listing(st.session_state['business_listing'])
         return
+    requested=st.session_state.pop('business_requested_view',None)
+    if requested:
+        st.session_state['business_view']=requested
+    view=st.radio('Forretningsvisning',['Forløb','Projekter'],horizontal=True,key='business_view')
+    if view=='Projekter':
+        from views.projects import render as render_projects
+        render_projects()
+        return
     companies = q('SELECT id, name FROM companies ORDER BY name')
     tracks = q('''SELECT t.*, c.name AS company FROM commercial_tracks t
         JOIN companies c ON c.id=t.company_id ORDER BY t.created_at DESC, t.id DESC''')

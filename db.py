@@ -605,6 +605,74 @@ def migration_007_followup_completion(conn):
         WHERE id=NEW.id; END''')
 
 
+def migration_008_project_core(conn):
+    conn.execute('''CREATE TABLE projects (
+        id INTEGER PRIMARY KEY, title TEXT NOT NULL CHECK(length(trim(title))>0),
+        purpose TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'Planlagt'
+        CHECK(status IN ('Planlagt','Aktivt','Afventer','Afsluttet','Annulleret')),
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''')
+    conn.execute('''CREATE TABLE project_companies (
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        company_id INTEGER NOT NULL REFERENCES companies(id),
+        coordinator INTEGER NOT NULL DEFAULT 0 CHECK(coordinator IN (0,1)),
+        contracting_party INTEGER NOT NULL DEFAULT 0 CHECK(contracting_party IN (0,1)),
+        payer INTEGER NOT NULL DEFAULT 0 CHECK(payer IN (0,1)),
+        participant INTEGER NOT NULL DEFAULT 0 CHECK(participant IN (0,1)),
+        beneficiary INTEGER NOT NULL DEFAULT 0 CHECK(beneficiary IN (0,1)),
+        PRIMARY KEY(project_id,company_id))''')
+    conn.execute('''CREATE TABLE project_workstreams (
+        id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id),
+        company_id INTEGER, title TEXT NOT NULL CHECK(length(trim(title))>0),
+        status TEXT NOT NULL DEFAULT 'Planlagt'
+        CHECK(status IN ('Planlagt','I gang','Afventer','Afsluttet','Annulleret')),
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        FOREIGN KEY(project_id,company_id) REFERENCES project_companies(project_id,company_id))''')
+    conn.execute('''CREATE TABLE project_tracks (
+        project_id INTEGER NOT NULL REFERENCES projects(id),
+        track_id INTEGER NOT NULL UNIQUE REFERENCES commercial_tracks(id),
+        PRIMARY KEY(project_id,track_id))''')
+    # Narrow guards also protect these new relations from legacy connections with FK off.
+    conditions = {
+        'project_companies': "NOT EXISTS(SELECT 1 FROM projects WHERE id=NEW.project_id) OR NOT EXISTS(SELECT 1 FROM companies WHERE id=NEW.company_id)",
+        'project_workstreams': "NOT EXISTS(SELECT 1 FROM projects WHERE id=NEW.project_id) OR (NEW.company_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM project_companies WHERE project_id=NEW.project_id AND company_id=NEW.company_id))",
+        'project_tracks': "NOT EXISTS(SELECT 1 FROM projects WHERE id=NEW.project_id) OR NOT EXISTS(SELECT 1 FROM commercial_tracks t JOIN project_companies p ON p.company_id=t.company_id WHERE t.id=NEW.track_id AND p.project_id=NEW.project_id)",
+    }
+    for table, condition in conditions.items():
+        for operation in ('INSERT','UPDATE'):
+            conn.execute(f'''CREATE TRIGGER validate_{table}_{operation.lower()} BEFORE {operation} ON {table}
+                WHEN {condition} BEGIN SELECT RAISE(ABORT,'Ugyldig projektrelation'); END''')
+    conn.execute('''CREATE TRIGGER protect_project_company_delete BEFORE DELETE ON project_companies
+        WHEN EXISTS(SELECT 1 FROM project_workstreams WHERE project_id=OLD.project_id AND company_id=OLD.company_id)
+        OR EXISTS(SELECT 1 FROM project_tracks p JOIN commercial_tracks t ON t.id=p.track_id WHERE p.project_id=OLD.project_id AND t.company_id=OLD.company_id)
+        BEGIN SELECT RAISE(ABORT,'Deltageren har tilknyttede spor eller forløb'); END''')
+    conn.execute('''CREATE TRIGGER protect_project_company_key BEFORE UPDATE OF project_id,company_id ON project_companies
+        WHEN NEW.project_id<>OLD.project_id OR NEW.company_id<>OLD.company_id
+        BEGIN SELECT RAISE(ABORT,'Projektdeltagerens nøgle kan ikke flyttes'); END''')
+    conn.execute('''CREATE TRIGGER protect_project_delete BEFORE DELETE ON projects
+        WHEN EXISTS(SELECT 1 FROM project_companies WHERE project_id=OLD.id)
+        OR EXISTS(SELECT 1 FROM project_workstreams WHERE project_id=OLD.id)
+        OR EXISTS(SELECT 1 FROM project_tracks WHERE project_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Projektet har relationer'); END''')
+    conn.execute('''CREATE TRIGGER protect_project_company_source BEFORE DELETE ON companies
+        WHEN EXISTS(SELECT 1 FROM project_companies WHERE company_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Virksomheden er projektdeltager'); END''')
+    conn.execute('''CREATE TRIGGER protect_project_track_source BEFORE DELETE ON commercial_tracks
+        WHEN EXISTS(SELECT 1 FROM project_tracks WHERE track_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Forløbet er projekttilknyttet'); END''')
+    conn.execute('''CREATE TRIGGER protect_project_track_company BEFORE UPDATE OF company_id ON commercial_tracks
+        WHEN EXISTS(SELECT 1 FROM project_tracks p WHERE p.track_id=OLD.id AND NOT EXISTS(
+        SELECT 1 FROM project_companies c WHERE c.project_id=p.project_id AND c.company_id=NEW.company_id))
+        BEGIN SELECT RAISE(ABORT,'Forløbets virksomhed skal være projektdeltager'); END''')
+    for parent, condition in (
+        ('projects','EXISTS(SELECT 1 FROM project_companies WHERE project_id=OLD.id) OR EXISTS(SELECT 1 FROM project_workstreams WHERE project_id=OLD.id) OR EXISTS(SELECT 1 FROM project_tracks WHERE project_id=OLD.id)'),
+        ('companies','EXISTS(SELECT 1 FROM project_companies WHERE company_id=OLD.id)'),
+        ('commercial_tracks','EXISTS(SELECT 1 FROM project_tracks WHERE track_id=OLD.id)')):
+        conn.execute(f'''CREATE TRIGGER protect_{parent}_project_id BEFORE UPDATE OF id ON {parent}
+            WHEN NEW.id<>OLD.id AND ({condition})
+            BEGIN SELECT RAISE(ABORT,'En refereret projektnøgle kan ikke ændres'); END''')
+    conn.execute('CREATE INDEX idx_project_workstreams_project ON project_workstreams(project_id)')
+
+
 MIGRATIONS = (
     (1, "core_schema", migration_001_core_schema),
     (2, "briefings", migration_002_briefings),
@@ -613,6 +681,7 @@ MIGRATIONS = (
     (5, "agreement_details", migration_005_agreement_details),
     (6, "agreement_acceptance", migration_006_agreement_acceptance),
     (7, "followup_completion", migration_007_followup_completion),
+    (8, "project_core", migration_008_project_core),
 )
 
 
@@ -660,6 +729,9 @@ def migrate_db(conn):
 
 def init_db():
     validate_data_configuration(APP_MODE, DATA_DIR, PRODUCTION_DATA_DIR)
+    if APP_MODE == 'development' and any(m[0] == 8 for m in pending_migrations(DB_PATH)) and os.environ.get('FRANK_MONITOR_STAGE61_MIGRATION') != '1':
+        from runtime_config import RuntimeConfigurationError
+        raise RuntimeConfigurationError('Etape 6.1 kræver genstart med Start Monitor Development.bat. Automatisk genindlæsning må ikke migrere databasen.')
     if APP_MODE == 'development' and any(m[0] == 7 for m in pending_migrations(DB_PATH)) and os.environ.get('FRANK_MONITOR_STAGE52_MIGRATION') != '1':
         from runtime_config import RuntimeConfigurationError
         raise RuntimeConfigurationError('Etape 5.2 kræver genstart med Start Monitor Development.bat. Automatisk genindlæsning må ikke migrere databasen.')

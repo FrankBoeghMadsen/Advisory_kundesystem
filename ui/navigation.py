@@ -32,6 +32,7 @@ def render_navigation():
 
 
 def open_business(track_id, section='Pipeline', record_id=None, kind=None):
+    st.session_state['business_requested_view'] = 'Forløb'
     st.session_state['business_track_id'] = int(track_id)
     st.session_state['business_requested_section'] = section
     st.session_state['business_focus'] = dict(kind=kind, id=record_id,track_id=int(track_id))
