@@ -1,5 +1,7 @@
 # FBM Advisory Dashboard
 
+Etape 6.1b samler projektknapper ved overskrifterne, forbedrer formularhandlinger og retur-navigation og gør tilknytningsvejledning situationsbestemt. Se [ændringer, testresultater, begrænsninger og prøvevejledning](ETAPE_6_1B_IMPLEMENTERING.md). Ingen migration eller driftsoverførsel.
+
 Etape 6.1a forbedrer projektoversigt, formularnulstilling, aktive valg, kvitteringer og navigation tilbage fra forløb. Se [ændringer, tests og prøvevejledning](ETAPE_6_1A_IMPLEMENTERING.md). Ingen ny migration; drift er fortsat ikke frigivet.
 
 Etape 6.1 tilføjer en valgfri projektkerne under Forretning → Projekter. Se [implementering, migration og prøvevejledning](ETAPE_6_1_IMPLEMENTERING.md). Eksisterende enkeltkundeopgaver kræver fortsat intet projekt. Økonomimodel og funktioner fra 6.2–6.6 er ikke implementeret; drift er ikke frigivet.

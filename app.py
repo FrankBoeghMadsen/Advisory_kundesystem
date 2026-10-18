@@ -24,6 +24,15 @@ div.stButton > button { min-height: 2.35rem; font-size: 0.95rem; }
 .company-row { border-bottom: 1px solid #eee; padding: 0.15rem 0; }
 h1 { font-size: 2rem !important; letter-spacing: 0 !important; }
 h2, h3 { letter-spacing: 0 !important; }
+h1, h2, h3, h4 { color: #243F50; }
+[data-testid="stMainBlockContainer"] { padding-top: 1.5rem; padding-bottom: 2rem; }
+.st-key-project_module [data-testid="stVerticalBlock"] { gap: 0.65rem; }
+.st-key-project_module h4 { margin-top: 0.8rem; }
+.st-key-project_form_actions { max-width: 26rem; }
+@media (max-width: 768px) {
+    .st-key-project_form_actions [data-testid="stHorizontalBlock"] { flex-wrap: nowrap; }
+    .st-key-project_form_actions [data-testid="stColumn"] { min-width: 0; width: auto; flex: 1 1 auto; }
+}
 [data-testid="stRadio"] label:has(input:checked) { background: #d3ebe4; border-bottom: 3px solid #24776b; font-weight: 700; }
 .st-key-business_navigation label:has(input[type="radio"]) { padding: 8px 12px; border: 1px solid #aab6b2; border-radius: 4px; }
 .st-key-business_status_filters [data-baseweb="tag"], .st-key-project_module [data-baseweb="tag"] { background-color: #e9efec; color: #243b35; border: 1px solid #b6c7c0; }
@@ -36,15 +45,17 @@ if "page" not in st.session_state:
 if st.session_state["page"] not in PAGE_OPTIONS:
     st.session_state["page"] = "Dashboard"
 
-st.title(APP_TITLE)
-st.caption(APP_VERSION)
-st.caption(APP_CAPTION)
-
 with st.sidebar:
+    st.markdown('**'+APP_TITLE+'**')
     if APP_MODE == "development":
         st.warning("UDVIKLINGSDATABASE")
-    st.caption(f"Tilstand: {mode_label()}")
-    st.caption(f"Data: {DATA_DIR}")
+    elif APP_MODE == "test":
+        st.warning("TESTDATABASE")
+    with st.expander('Om og tekniske oplysninger'):
+        st.caption(APP_VERSION)
+        st.caption(APP_CAPTION)
+        st.caption(f"Tilstand: {mode_label()}")
+        st.caption(f"Data: {DATA_DIR}")
     render_navigation()
     if st.session_state['page'] in ['Signalindbakke','Kilder','Triggerregler','Briefing'] and st.button("Kør overvågning nu"):
         with st.spinner("Overvåger kilder..."):
@@ -52,5 +63,9 @@ with st.sidebar:
         st.success(f"Færdig. Fund indsamlet: {result['collected']}. Relevante signaler: {result['relevant']}.")
 
 page = st.session_state["page"]
+
+if APP_MODE in ('development','test'):
+    with st.container(key='runtime_notice'):
+        st.caption('**UDVIKLINGSDATABASE**' if APP_MODE=='development' else '**TESTDATABASE**')
 
 render_page(page)

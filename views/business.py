@@ -448,20 +448,18 @@ def render():
     if requested:
         st.session_state['business_view']=requested
     view=st.radio('Forretningsvisning',['Forløb','Projekter'],horizontal=True,key='business_view')
+    project_content=st.empty()
+    track_content=st.empty()
     if view=='Projekter':
         from views.projects import render as render_projects
-        render_projects()
+        with project_content.container():
+            render_projects()
         return
-    context=st.session_state.get('business_project_return')
-    if context:
-        origin=q('SELECT p.id,p.title FROM projects p JOIN project_tracks t ON t.project_id=p.id WHERE p.id=? AND t.track_id=?',
-                 (context['project_id'],context['track_id']))
-        if len(origin):
-            if st.button('Tilbage til projekt: '+origin.iloc[0]['title'],key='business_return_project',icon=':material/arrow_back:'):
-                open_project(int(origin.iloc[0]['id']))
-                st.rerun()
-        else:
-            st.session_state.pop('business_project_return',None)
+    with track_content.container():
+        _render_tracks()
+
+
+def _render_tracks():
     companies = q('SELECT id, name FROM companies ORDER BY name')
     tracks = q('''SELECT t.*, c.name AS company FROM commercial_tracks t
         JOIN companies c ON c.id=t.company_id ORDER BY t.created_at DESC, t.id DESC''')
@@ -507,6 +505,16 @@ def render():
     if st.session_state.get('business_focus',{}).get('track_id',selected)!=selected:
         st.session_state.pop('business_focus',None)
     st.markdown(f"### {row['company']} · {row['title']}")
+    context=st.session_state.get('business_project_return')
+    if context:
+        origin=q('SELECT p.id,p.title FROM projects p JOIN project_tracks t ON t.project_id=p.id WHERE p.id=? AND t.track_id=?',
+                 (context['project_id'],context['track_id']))
+        if not len(origin):
+            st.session_state.pop('business_project_return',None)
+        elif selected==context['track_id']:
+            if st.button('Tilbage til projekt: '+origin.iloc[0]['title'],key='business_return_project',icon=':material/arrow_back:'):
+                open_project(int(origin.iloc[0]['id']))
+                st.rerun()
     st.caption(f"{row['status']} · Beslutning: {date_text(row['expected_decision_date'])}")
     _followups(selected, 'selected_track')
     counts={
