@@ -1,5 +1,36 @@
 # Etape 6.1b - kompakt brugerflade og navigation
 
+## Efterfølgende godkendt brandtilpasning
+
+Ejeren har efter afleveringen oplyst placeringen af designaktiverne og godkendt
+indsættelse af logo og manualfarver. Bemærkningen nedenfor om manglende aktiver
+beskriver derfor alene den oprindelige aflevering, ikke den aktuelle version.
+
+Designmanual v1.2, 15. juli 2026, er læst fra ejerens `Grafik og designlinje`-mappe.
+Authority Blue #000080 anvendes til overskrifter og primær navigation,
+Deep Graphite #1F2933 til tekst, Signal Blue Light #CDEFF8 til aktive valg,
+Soft Grey #E5E7EB til diskrete filtre/rammer, White #FFFFFF som hovedbaggrund
+og Warm Off-white #F7F5EF som sekundær baggrund. Farverne er ikke gættet.
+Semantiske sikkerhedsadvarsler bevarer Streamlits advarselsfarver.
+
+Det eksisterende `logo-ikon-transparent.png` er kopieret uændret til
+`assets/advisory-compass.png` og vises ved programnavnet i sidepanelet, 56 px bredt,
+med bevaret højde/bredde-forhold. Det bruges også som browserikon. Original og
+kopi har identisk SHA-256; kilde og palet er dokumenteret i `assets/README.md`.
+Der er ikke ændret noget i originalmaterialerne, datamodel eller funktioner.
+Kun `[theme]`-farverne i `.streamlit/config.toml` er ændret; lokal netværksbinding
+og øvrige sikkerhedsindstillinger er uændrede.
+
+Efter ændringen består **52 automatiserede tests**, inklusive en ny kontrol af
+manualfarver og logoets uændrede filindhold/gyldighed. Browserkontrol på port 8519
+med isolerede syntetiske testdata bekræfter indlæst logo på 56 px og beregnet
+overskriftsfarve `rgb(0, 0, 128)` samt tekstfarve `rgb(31, 41, 51)`.
+Desktopskærmbillede er gennemset. Den midlertidige testserver er stoppet.
+Driftsdatabasens SHA-256 er fortsat uændret. Ingen driftsoverførsel.
+
+Genstart udviklingsversionen efter temaændringen, og genindlæs browseren.
+Kontrollér logo, blå overskrifter og fortsat tydelig UDVIKLINGSDATABASE-markering.
+
 ## Ændringer
 
 - Mindre topafstand på siderne. Den gentagne store programtitel, version og

@@ -1,4 +1,5 @@
 import streamlit as st
+from pathlib import Path
 
 from app_config import APP_CAPTION, APP_TITLE, APP_VERSION, PAGE_OPTIONS
 from db import DATA_DIR, init_db
@@ -8,7 +9,8 @@ from views import render_page
 from ui.navigation import render_navigation
 
 
-st.set_page_config(page_title=APP_TITLE, layout="wide")
+LOGO_PATH=Path(__file__).resolve().parent/'assets'/'advisory-compass.png'
+st.set_page_config(page_title=APP_TITLE, page_icon=str(LOGO_PATH), layout="wide")
 try:
     init_db()
 except RuntimeConfigurationError as exc:
@@ -21,10 +23,10 @@ st.markdown("""
 div.stButton > button { min-height: 2.35rem; font-size: 0.95rem; }
 [data-testid="stDataFrame"] { font-size: 0.88rem; }
 .small-muted { color: #777; font-size: 0.85rem; }
-.company-row { border-bottom: 1px solid #eee; padding: 0.15rem 0; }
+.company-row { border-bottom: 1px solid #E5E7EB; padding: 0.15rem 0; }
 h1 { font-size: 2rem !important; letter-spacing: 0 !important; }
 h2, h3 { letter-spacing: 0 !important; }
-h1, h2, h3, h4 { color: #243F50; }
+.stApp h1, .stApp h2, .stApp h3, .stApp h4 { color: #000080 !important; }
 [data-testid="stMainBlockContainer"] { padding-top: 1.5rem; padding-bottom: 2rem; }
 .st-key-project_module [data-testid="stVerticalBlock"] { gap: 0.65rem; }
 .st-key-project_module h4 { margin-top: 0.8rem; }
@@ -33,10 +35,10 @@ h1, h2, h3, h4 { color: #243F50; }
     .st-key-project_form_actions [data-testid="stHorizontalBlock"] { flex-wrap: nowrap; }
     .st-key-project_form_actions [data-testid="stColumn"] { min-width: 0; width: auto; flex: 1 1 auto; }
 }
-[data-testid="stRadio"] label:has(input:checked) { background: #d3ebe4; border-bottom: 3px solid #24776b; font-weight: 700; }
-.st-key-business_navigation label:has(input[type="radio"]) { padding: 8px 12px; border: 1px solid #aab6b2; border-radius: 4px; }
-.st-key-business_status_filters [data-baseweb="tag"], .st-key-project_module [data-baseweb="tag"] { background-color: #e9efec; color: #243b35; border: 1px solid #b6c7c0; }
-.st-key-business_status_filters [data-baseweb="tag"] svg, .st-key-project_module [data-baseweb="tag"] svg { color: #243b35; }
+[data-testid="stRadio"] label:has(input:checked) { background: #CDEFF8; border-bottom: 3px solid #000080; font-weight: 700; }
+.st-key-business_navigation label:has(input[type="radio"]) { padding: 8px 12px; border: 1px solid #E5E7EB; border-radius: 4px; }
+.st-key-business_status_filters [data-baseweb="tag"], .st-key-project_module [data-baseweb="tag"] { background-color: #E5E7EB; color: #1F2933; border: 1px solid #E5E7EB; }
+.st-key-business_status_filters [data-baseweb="tag"] svg, .st-key-project_module [data-baseweb="tag"] svg { color: #1F2933; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -46,7 +48,9 @@ if st.session_state["page"] not in PAGE_OPTIONS:
     st.session_state["page"] = "Dashboard"
 
 with st.sidebar:
-    st.markdown('**'+APP_TITLE+'**')
+    logo, name=st.columns([1,3],vertical_alignment='center')
+    logo.image(str(LOGO_PATH),width=56)
+    name.markdown('**'+APP_TITLE+'**')
     if APP_MODE == "development":
         st.warning("UDVIKLINGSDATABASE")
     elif APP_MODE == "test":
