@@ -13,6 +13,9 @@ from app_context import (
 )
 
 
+from ui.activity_editor import meeting_editor, require_title
+
+
 def render():
     focus=st.session_state.get('record_focus',{})
     focused_id=focus.get('id') if focus.get('page')=='Møder' else None
@@ -20,6 +23,10 @@ def render():
         st.session_state.pop('record_focus',None)
         st.rerun()
     st.subheader("Møder")
+    if st.button('Opret selvstændig opfølgning'):
+        st.session_state['create_followup'] = True
+        set_page('Opgaver')
+        st.rerun()
     today_iso = date.today().isoformat()
     st.caption("Samlet overblik over kommende og tidligere møder på tværs af aktører.")
 
@@ -31,19 +38,22 @@ def render():
         if not len(companies):
             st.info("Opret først en aktør under Virksomheder.")
         else:
-            with st.form(f"meetings_add_{st.session_state.get('meetings_form_version',0)}", clear_on_submit=True):
+            with st.form(f"meetings_add_{st.session_state.get('meetings_form_version',0)}", enter_to_submit=False):
                 a, b, c = st.columns([1.3, 1, 1])
-                selected_company = a.selectbox("Aktør", company_names)
-                meeting_date = b.text_input("Dato", today_iso)
+                selected_company = a.selectbox("Aktør", company_names, index=None, placeholder='Vælg aktør')
+                meeting_date = b.date_input("Dato", date.today(), format='DD-MM-YYYY').isoformat()
                 meeting_time = c.text_input("Tid", "")
                 d, e = st.columns([1.5, 1])
-                title = d.text_input("Titel", "Møde")
+                title = d.text_input("Titel", "")
                 meeting_type = e.selectbox("Type", ["Kaffemøde", "Kundemøde", "Opfølgning", "Statusmøde", "Referat", "Andet"], index=0)
                 location = st.text_input("Sted", "")
                 participants = st.text_input("Deltagere", "")
                 summary = st.text_area("Resume", "", height=110)
                 next_steps = st.text_area("Næste skridt / frister", "", height=90)
-                if st.form_submit_button("Gem møde"):
+                submitted = st.form_submit_button("Gem møde")
+                if submitted and (not title.strip() or not selected_company):
+                    st.error('Vælg en aktør og angiv en beskrivende titel.')
+                if submitted and title.strip() and selected_company:
                     run(
                         """INSERT INTO meetings
                            (company_id, meeting_date, meeting_time, location, title, meeting_type, participants, relation_strength, confidentiality, summary, next_steps, created_at, updated_at)
@@ -53,7 +63,7 @@ def render():
                             meeting_date,
                             meeting_time,
                             location,
-                            title,
+                            require_title(title),
                             meeting_type,
                             participants,
                             "Middel",
@@ -116,7 +126,7 @@ def render():
                     marker_text = f" · {', '.join(markers)}" if markers else ""
                     meeting_options_for_merge.append((f"#{int(row['id'])} · {row['titel'] or 'Møde'}{marker_text}", int(row["id"])))
 
-                with st.form("merge_meetings_form"):
+                with st.form("merge_meetings_form", enter_to_submit=False):
                     keep_label = st.selectbox("Behold som hovedmøde", [label for label, _ in meeting_options_for_merge])
                     merge_label = st.selectbox("Flyt indhold fra og slet", [label for label, _ in meeting_options_for_merge])
                     merge_submitted = st.form_submit_button("Saml mødeposter")
@@ -163,6 +173,9 @@ def render():
                             run("UPDATE uploaded_documents SET meeting_id=? WHERE meeting_id=?", (keep_id, merge_id))
                             run("UPDATE briefings SET meeting_id=?, updated_at=? WHERE meeting_id=?", (keep_id, now_iso(), merge_id))
                             run("UPDATE observations SET related_meeting_id=?, updated_at=? WHERE related_meeting_id=?", (keep_id, now_iso(), merge_id))
+                            run("UPDATE followups SET source_id=? WHERE source_type='AI-opfølgning' AND source_id=?", (keep_id,merge_id))
+                            run('INSERT OR IGNORE INTO meeting_tracks (meeting_id,track_id,created_at) SELECT ?,track_id,created_at FROM meeting_tracks WHERE meeting_id=?', (keep_id,merge_id))
+                            run('DELETE FROM meeting_tracks WHERE meeting_id=?', (merge_id,))
                             run("DELETE FROM meetings WHERE id=?", (merge_id,))
                             st.success("Mødeposterne er samlet.")
                             st.rerun()
@@ -196,9 +209,10 @@ def render():
         if focused_id:
             shown=df[df['id']==focused_id]
         table_df = shown.drop(columns=["id", "company_id", "referattekst"])
+        table_df['dato'] = table_df['dato'].map(display_date)
         st.markdown(f"### Viste møder ({len(shown)})")
         st.dataframe(table_df, use_container_width=True, hide_index=True)
-        with st.expander("Åbn referat / mødedetaljer", expanded=bool(focused_id)):
+        with st.expander("Åbn / redigér møde og referat", expanded=bool(focused_id)):
             options = []
             for _, row in shown.iterrows():
                 label = f"{display_date(row['dato'])} - {row['virksomhed']} - {row['titel']}"
@@ -207,6 +221,7 @@ def render():
                 selected_label = st.selectbox("Vælg møde", [label for label, _ in options])
                 selected_id = dict(options)[selected_label]
                 selected = shown[shown["id"] == selected_id].iloc[0]
+                meeting_editor(selected_id)
                 a, b = st.columns(2)
                 if a.button("Åbn profil", key=f"meetings_detail_profile_{selected_id}", disabled=not has_db_id(selected["company_id"])):
                     open_company_section(int(selected["company_id"]), "Møder")

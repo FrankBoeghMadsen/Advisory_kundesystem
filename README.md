@@ -1,6 +1,6 @@
 # FBM Advisory Dashboard
 
-Aktuel udviklingsversion: 3.0. Se [ETAPE_5_IMPLEMENTERING.md](ETAPE_5_IMPLEMENTERING.md) for det daglige aktivitetsoverblik, navigation, aftalehistorik, testresultater og praktisk prøvevejledning.
+Aktuel udviklingsversion: 3.0. Se [ETAPE_5_1_IMPLEMENTERING.md](ETAPE_5_1_IMPLEMENTERING.md) for møder, selvstændige opfølgninger, sikker sletning, testresultater, prøvevejledning og planen for senere ren drift. Det øvrige aktivitetsoverblik er beskrevet i [ETAPE_5_IMPLEMENTERING.md](ETAPE_5_IMPLEMENTERING.md).
 
 Udviklingsversionen er endnu ikke frigivet til drift. Den aktuelle kode afprøves med `Start Monitor Development.bat`; produktionstilstand stopper, hvis udviklingsmigrationerne afventer. Den aktive database opgraderes først efter særskilt godkendelse.
 

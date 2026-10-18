@@ -492,9 +492,10 @@ def render():
     st.divider()
     sections=['Pipeline','Tilbud','Kundeopgaver','Deadlines','Afsluttet']
     requested_section=st.session_state.pop('business_requested_section',None)
-    section=st.radio('Forretningsområde',sections,
-        index=sections.index(requested_section or st.session_state.get('business_section','Pipeline')),
-        horizontal=True,key='business_section',format_func=lambda name:f'{name} ({counts[name]})' if name in counts else name)
+    with st.container(key='business_navigation'):
+        section=st.radio('Forretningsområde',sections,
+            index=sections.index(requested_section or st.session_state.get('business_section','Pipeline')),
+            horizontal=True,key='business_section',format_func=lambda name:f'{name} ({counts[name]})' if name in counts else name)
     st.divider()
     if section=='Pipeline':
         st.write(row['need_description'] or 'Intet behov beskrevet.')

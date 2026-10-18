@@ -24,6 +24,10 @@ from app_context import (
 )
 
 
+from ui.activity_editor import meeting_editor, deletion_controls
+from services.business_values import parse_date, iso_date
+
+
 def render():
     st.subheader("Virksomheder")
     companies = q("SELECT * FROM companies ORDER BY name")
@@ -264,38 +268,43 @@ def render():
                             if f["description"]:
                                 st.write(f["description"])
                             with st.expander("Redigér / slet opfølgning"):
-                                with st.form(f"edit_followup_{int(f['id'])}"):
+                                with st.form(f"edit_followup_{int(f['id'])}", enter_to_submit=False):
                                     title = st.text_input("Titel", f["title"])
                                     followup_type = st.selectbox("Type", FOLLOWUP_TYPES, index=severity_index(f["followup_type"] or "Opfølgning", FOLLOWUP_TYPES))
                                     next_action = st.text_input("Næste handling", f["next_action"] or "")
                                     description = st.text_area("Opgavebeskrivelse / baggrund", f["description"] or "", height=120)
                                     person = st.text_input("Person", f["person"] or "")
-                                    due_date = st.text_input("Dato/timing", f["due_date"] or "")
+                                    due_value = st.date_input('Opfølgningsdato', value=parse_date(f['due_date']), format='DD-MM-YYYY')
+                                    due_date = iso_date(due_value) if due_value else (f['due_date'] if not parse_date(f['due_date']) else '')
                                     priority = st.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=severity_index(f["priority"], ["Lav", "Middel", "Høj"]))
                                     status = st.selectbox("Status", ["Ny", "Planlagt", "I gang", "Afventer", "Lukket", "Arkiveret"], index=severity_index(f["status"], ["Ny", "Planlagt", "I gang", "Afventer", "Lukket", "Arkiveret"]))
                                     a, b = st.columns(2)
                                     if a.form_submit_button("Gem ændringer"):
+                                        if not title.strip():
+                                            st.error('Angiv en beskrivende titel.')
+                                            return
                                         run(
                                             "UPDATE followups SET title=?, followup_type=?, description=?, next_action=?, person=?, due_date=?, priority=?, status=?, updated_at=? WHERE id=?",
                                             (title, followup_type, description, next_action, person, due_date, priority, status, now_iso(), int(f["id"])),
                                         )
                                         st.rerun()
-                                    if b.form_submit_button("Slet opfølgning"):
-                                        run("DELETE FROM followups WHERE id=?", (int(f["id"]),))
-                                        st.rerun()
+                                deletion_controls('followups',int(f['id']))
                 else:
                     st.info("Ingen opfølgninger endnu.")
                 with st.expander("Tilføj opfølgning / lead"):
-                    with st.form(f"add_followup_{company_id}_{st.session_state.get('followup_form_version',0)}", clear_on_submit=True):
+                    with st.form(f"add_followup_{company_id}_{st.session_state.get('followup_form_version',0)}", enter_to_submit=False):
                         title = st.text_input("Titel", value="")
                         followup_type = st.selectbox("Type", FOLLOWUP_TYPES, index=0)
                         next_action = st.text_input("Næste handling", value="")
                         description = st.text_area("Opgavebeskrivelse / baggrund", value="", height=120)
                         person = st.text_input("Person", value="")
-                        due_date = st.text_input("Dato/timing", value="")
+                        due_date = iso_date(st.date_input('Opfølgningsdato', value=None, format='DD-MM-YYYY'))
                         priority = st.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=1)
                         status = st.selectbox("Status", ["Ny", "Planlagt", "I gang", "Afventer"], index=0)
                         if st.form_submit_button("Gem opfølgning"):
+                            if not title.strip():
+                                st.error('Angiv en beskrivende titel.')
+                                return
                             run(
                                 """INSERT INTO followups
                                    (company_id, title, followup_type, description, next_action, person, due_date, priority, status, source_type, created_at, updated_at)
@@ -420,26 +429,12 @@ def render():
                                             )
                                             st.success("AI-opfølgning gemt som opfølgning/lead på dashboardet.")
                             with st.expander("Redigér / slet møde"):
-                                with st.form(f"edit_meeting_{int(m['id'])}"):
-                                    title = st.text_input("Titel", m["title"])
-                                    meeting_date = st.text_input("Dato", m["meeting_date"] or "")
-                                    meeting_time = st.text_input("Tidspunkt", m["meeting_time"] if "meeting_time" in meetings.columns else "")
-                                    location = st.text_input("Adresse/sted", m["location"] if "location" in meetings.columns else "")
-                                    participants = st.text_input("Deltagere", m["participants"] or "")
-                                    summary = st.text_area("Resume", m["summary"] or "")
-                                    key_takeaways = st.text_area("Hvad lærte vi?", m["key_takeaways"] or "")
-                                    next_steps = st.text_area("Næste skridt / frister", m["next_steps"] or "")
-                                    a,b = st.columns(2)
-                                    if a.form_submit_button("Gem ændringer"):
-                                        run("UPDATE meetings SET title=?, meeting_date=?, meeting_time=?, location=?, participants=?, summary=?, key_takeaways=?, next_steps=?, updated_at=? WHERE id=?",
-                                            (title, meeting_date, meeting_time, location, participants, summary, key_takeaways, next_steps, now_iso(), int(m["id"]))); st.rerun()
-                                    if b.form_submit_button("Slet møde"):
-                                        run("DELETE FROM meetings WHERE id=?", (int(m["id"]),)); st.rerun()
+                                meeting_editor(int(m['id']))
                 with st.expander("Tilføj møde", expanded=False):
                     form_key = f"add_meeting_{company_id}_{st.session_state.get('meeting_form_version',0)}"
-                    with st.form(form_key, clear_on_submit=True):
+                    with st.form(form_key, enter_to_submit=False):
                         title = st.text_input("Titel", value="")
-                        meeting_date = st.text_input("Dato", datetime.now().strftime("%Y-%m-%d"))
+                        meeting_date = st.date_input('Dato', datetime.now().date(), format='DD-MM-YYYY').isoformat()
                         meeting_time = st.text_input("Tidspunkt", value="")
                         location = st.text_input("Adresse/sted", value="")
                         meeting_type = st.selectbox("Type", ["Kaffemøde","Kundemøde","Netværk","Konference","Telefon","Regulatorisk","Uformelt"])
@@ -450,6 +445,9 @@ def render():
                         key_takeaways = st.text_area("Hvad lærte vi?", value="")
                         next_steps = st.text_area("Næste skridt / frister", value="")
                         if st.form_submit_button("Gem møde"):
+                            if not title.strip():
+                                st.error('Angiv en beskrivende titel.')
+                                return
                             run("""INSERT INTO meetings (company_id, meeting_date, meeting_time, location, title, meeting_type, participants, relation_strength, confidentiality, summary, key_takeaways, next_steps, created_at, updated_at)
                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                                 (company_id, meeting_date, meeting_time, location, title, meeting_type, participants, relation_strength, confidentiality, summary, key_takeaways, next_steps, now_iso(), now_iso()))

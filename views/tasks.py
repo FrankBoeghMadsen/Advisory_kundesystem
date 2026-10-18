@@ -15,6 +15,10 @@ from app_context import (
 )
 
 
+from ui.activity_editor import require_title, deletion_controls
+from services.business_values import parse_date, iso_date
+
+
 def render():
     today_iso = date.today().isoformat()
     st.subheader("Opfølgninger")
@@ -28,8 +32,8 @@ def render():
     company_names = companies["name"].tolist() if len(companies) else []
     company_lookup = {row["name"]: int(row["id"]) for _, row in companies.iterrows()} if len(companies) else {}
 
-    with st.expander("Opret ny opgave / lead", expanded=False):
-        with st.form(f"tasks_add_followup_{st.session_state.get('tasks_followup_form_version',0)}", clear_on_submit=True):
+    with st.expander("Opret opfølgning (uden møde)", expanded=st.session_state.get('create_followup',False)):
+        with st.form(f"tasks_add_followup_{st.session_state.get('tasks_followup_form_version',0)}", enter_to_submit=False):
             company_labels = ["Ingen aktør"] + company_names
             selected_company = st.selectbox("Aktør", company_labels)
             a, b, c = st.columns(3)
@@ -37,18 +41,21 @@ def render():
             followup_type = b.selectbox("Type", FOLLOWUP_TYPES, index=0)
             priority = c.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=1)
             d, e, f = st.columns(3)
-            due_date = d.text_input("Dato/timing", value="")
+            due_date = iso_date(d.date_input("Opfølgningsdato", value=None, format='DD-MM-YYYY'))
             status = e.selectbox("Status", ["Ny", "Planlagt", "I gang", "Afventer"], index=0)
             person = f.text_input("Person", value="")
             next_action = st.text_input("Næste handling", value="")
             description = st.text_area("Opgavebeskrivelse / baggrund", value="", height=120)
-            if st.form_submit_button("Gem opgave"):
+            submitted = st.form_submit_button("Gem opfølgning")
+            if submitted and not title.strip():
+                st.error('Angiv en beskrivende titel.')
+            if submitted and title.strip():
                 selected_company_id = company_lookup.get(selected_company) if selected_company != "Ingen aktør" else None
                 run(
                     """INSERT INTO followups
                        (company_id, title, followup_type, description, next_action, person, due_date, priority, status, source_type, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (selected_company_id, title, followup_type, description, next_action, person, due_date, priority, status, "Opgaver", now_iso(), now_iso()),
+                    (selected_company_id, require_title(title), followup_type, description, next_action, person, due_date, priority, status, "Opgaver", now_iso(), now_iso()),
                 )
                 st.session_state["tasks_followup_form_version"] = st.session_state.get("tasks_followup_form_version",0) + 1
                 st.success("Opgave gemt.")
@@ -90,7 +97,7 @@ def render():
             FOLLOWUP_STATUSES,
             default=["Ny", "Planlagt", "I gang", "Afventer"],
         )
-        priority_filter = f2.multiselect("Prioritet", ["Lav", "Middel", "Høj"], default=["Høj", "Middel"])
+        priority_filter = f2.multiselect("Prioritet", ["Lav", "Middel", "Høj"], default=["Lav", "Høj", "Middel"])
         type_filter = f3.multiselect("Type", FOLLOWUP_TYPES, default=FOLLOWUP_TYPES)
         actor_filter = f4.selectbox("Aktør", ["Alle"] + company_names)
         search_text = st.text_input("Søg i titel, handling, beskrivelse eller person", value="")
@@ -142,33 +149,38 @@ def render():
                         st.write(f"**Næste handling:** {task['next_action']}")
                     if task["description"]:
                         st.write(short(task["description"], 260))
-                    with st.expander("Redigér"):
-                        with st.form(f"tasks_edit_followup_{task_id}"):
+                    with st.expander("Redigér", expanded=bool(focused_id)):
+                        with st.form(f"tasks_edit_followup_{task_id}", enter_to_submit=False):
                             ea, eb, ec = st.columns(3)
                             edit_title = ea.text_input("Titel", task["title"] or "")
                             edit_type = eb.selectbox("Type", FOLLOWUP_TYPES, index=severity_index(task["followup_type"] or "Opfølgning", FOLLOWUP_TYPES))
                             edit_priority = ec.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=severity_index(task["priority"] or "Middel", ["Lav", "Middel", "Høj"]))
                             ed, ee, ef = st.columns(3)
-                            edit_due = ed.text_input("Dato/timing", task["due_date"] or "")
+                            edit_due = ed.date_input("Opfølgningsdato", value=parse_date(task['due_date']), format='DD-MM-YYYY')
+                            if task['due_date'] and not parse_date(task['due_date']):
+                                st.caption('Eksisterende datotekst: '+task['due_date'])
                             edit_status = ee.selectbox("Status", FOLLOWUP_STATUSES, index=severity_index(task["status"] or "Ny", FOLLOWUP_STATUSES))
                             edit_person = ef.text_input("Person", task["person"] or "")
                             edit_next_action = st.text_input("Næste handling", task["next_action"] or "")
                             edit_description = st.text_area("Beskrivelse", task["description"] or "", height=120)
                             save_task = st.form_submit_button("Gem ændringer")
-                            delete_task = st.form_submit_button("Slet opgave")
+                            close_task = st.form_submit_button("Afslut opfølgning")
                             if save_task:
+                                if not edit_title.strip():
+                                    st.error('Angiv en beskrivende titel.')
+                                    return
                                 run(
                                     """UPDATE followups
                                        SET title=?, followup_type=?, description=?, next_action=?, person=?, due_date=?, priority=?, status=?, updated_at=?
                                        WHERE id=?""",
-                                    (edit_title, edit_type, edit_description, edit_next_action, edit_person, edit_due, edit_priority, edit_status, now_iso(), task_id),
+                                    (require_title(edit_title), edit_type, edit_description, edit_next_action, edit_person, iso_date(edit_due) if edit_due else (task['due_date'] if not parse_date(task['due_date']) else ''), edit_priority, edit_status, now_iso(), task_id),
                                 )
                                 st.success("Opgave opdateret.")
                                 st.rerun()
-                            if delete_task:
-                                run("DELETE FROM followups WHERE id=?", (task_id,))
-                                st.success("Opgave slettet.")
+                            if close_task:
+                                run("UPDATE followups SET status='Lukket',updated_at=? WHERE id=?", (now_iso(),task_id))
                                 st.rerun()
+                        deletion_controls('followups', task_id)
         else:
             st.info("Ingen opgaver matcher filtrene.")
     else:

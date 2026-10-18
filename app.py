@@ -24,7 +24,8 @@ div.stButton > button { min-height: 2.35rem; font-size: 0.95rem; }
 .company-row { border-bottom: 1px solid #eee; padding: 0.15rem 0; }
 h1 { font-size: 2rem !important; letter-spacing: 0 !important; }
 h2, h3 { letter-spacing: 0 !important; }
-[data-testid="stRadio"] label:has(input:checked) { background: #e3efec; border-bottom: 3px solid #24776b; }
+[data-testid="stRadio"] label:has(input:checked) { background: #d3ebe4; border-bottom: 3px solid #24776b; font-weight: 700; }
+.st-key-business_navigation label:has(input[type="radio"]) { padding: 8px 12px; border: 1px solid #aab6b2; border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 

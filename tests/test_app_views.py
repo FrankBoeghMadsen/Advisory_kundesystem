@@ -15,6 +15,90 @@ PAGES = PAGE_OPTIONS
 
 
 class AppViewTests(unittest.TestCase):
+    def test_stage51_activity_forms_and_dashboard(self):
+        TEST_TEMP_ROOT.mkdir(parents=True,exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='stage51-ui-',dir=TEST_TEMP_ROOT) as directory:
+            root=Path(directory)
+            env=os.environ.copy()
+            env.update(FRANK_MONITOR_MODE='test',FRANK_MONITOR_DATA_DIR=str(root/'data'),
+                       FRANK_MONITOR_PRODUCTION_DATA_DIR=str(root/'production'))
+            runtime=root/'runtime'
+            runtime.mkdir()
+            env['TEMP']=env['TMP']=str(runtime)
+            script='''
+from datetime import date
+from streamlit.testing.v1 import AppTest
+from tests.stage4_fixture import populate
+from db import connect
+from services.activity_service import dashboard_data
+from ui.activity_editor import delete_activity
+track,proposal,engagement=populate()
+conn=connect()
+app=AppTest.from_file('app.py')
+app.session_state['page']='Møder'
+app.run(timeout=30)
+before=conn.execute('SELECT COUNT(*) FROM meetings').fetchone()[0]
+next(b for b in app.button if b.label=='Gem møde').click().run()
+assert conn.execute('SELECT COUNT(*) FROM meetings').fetchone()[0]==before
+assert len(app.error)
+next(t for t in app.text_input if t.label=='Titel').set_value('TEST Møde med indhold')
+next(s for s in app.selectbox if s.label=='Aktør' and s.value is None).select('TEST Apotek')
+next(b for b in app.button if b.label=='Gem møde').click().run()
+assert not len(app.exception),list(app.exception)
+mid=conn.execute("SELECT id FROM meetings WHERE title='TEST Møde med indhold'").fetchone()[0]
+app.text_input(key=f'meeting_edit_{mid}_title').set_value('TEST Rettet møde')
+next(b for b in app.button if b.label=='Gem mødeændringer').click().run()
+assert conn.execute('SELECT title FROM meetings WHERE id=?',(mid,)).fetchone()[0]=='TEST Rettet møde'
+next(b for b in app.button if b.label=='Opret selvstændig opfølgning').click().run()
+assert not len(app.exception),list(app.exception)
+before=conn.execute('SELECT COUNT(*) FROM followups').fetchone()[0]
+next(b for b in app.button if b.label=='Gem opfølgning').click().run()
+assert conn.execute('SELECT COUNT(*) FROM followups').fetchone()[0]==before
+next(t for t in app.text_input if t.label=='Titel').set_value('TEST Afventer dokumentation')
+next(t for t in app.text_input if t.label=='Næste handling').set_value('TEST Ryk kunden')
+next(d for d in app.date_input if d.label=='Opfølgningsdato').set_value(date(2026,10,21))
+next(b for b in app.button if b.label=='Gem opfølgning').click().run()
+assert not len(app.exception),list(app.exception)
+fid=conn.execute("SELECT id FROM followups WHERE title='TEST Afventer dokumentation'").fetchone()[0]
+assert conn.execute('SELECT COUNT(*) FROM meetings').fetchone()[0]==1
+app.session_state['record_focus']={'page':'Opgaver','id':fid}
+app.run()
+count=len(dashboard_data()['groups']['Åbne opfølgninger'])
+next(b for b in app.button if b.label=='Afslut opfølgning').click().run()
+assert len(dashboard_data()['groups']['Åbne opfølgninger'])==count-1
+assert not any(a['kind']=='Opfølgning' and a['id']==fid for a in dashboard_data()['activities'])
+assert app.button(key=f'delete_followups_{fid}').disabled
+app.checkbox(key=f'delete_confirm_followups_{fid}').check().run()
+app.button(key=f'delete_followups_{fid}').click().run()
+assert conn.execute('SELECT 1 FROM followups WHERE id=?',(fid,)).fetchone() is None
+try:
+    delete_activity('meetings',mid)
+    raise AssertionError('Unconfirmed deletion')
+except ValueError:
+    pass
+conn.execute("INSERT INTO briefings(company_id,meeting_id,title,briefing_text,created_at) SELECT company_id,id,'TEST Briefing','TEST Tekst','2026-10-18' FROM meetings WHERE id=?",(mid,))
+conn.commit()
+try:
+    delete_activity('meetings',mid,True)
+    raise AssertionError('Linked meeting deleted')
+except ValueError:
+    pass
+assert conn.execute('SELECT 1 FROM meetings WHERE id=?',(mid,)).fetchone()
+conn.execute('DELETE FROM briefings WHERE meeting_id=?',(mid,))
+conn.execute('INSERT INTO meeting_tracks(meeting_id,track_id,created_at) VALUES(?,?,?)',(mid,track,'2026-10-18'))
+conn.commit()
+delete_activity('meetings',mid,True)
+assert conn.execute('SELECT 1 FROM meetings WHERE id=?',(mid,)).fetchone() is None
+assert conn.execute('SELECT 1 FROM meeting_tracks WHERE meeting_id=?',(mid,)).fetchone() is None
+assert not conn.execute('PRAGMA foreign_key_check').fetchall()
+assert not len(app.exception),list(app.exception)
+conn.close()
+print('stage51=ok')
+'''
+            result=subprocess.run([sys.executable,'-c',script],cwd=ROOT,env=env,capture_output=True,text=True,timeout=90)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('stage51=ok',result.stdout)
+
     def test_stage5_dashboard_targets_and_clickable_counts(self):
         TEST_TEMP_ROOT.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryDirectory(prefix='stage5-ui-',dir=TEST_TEMP_ROOT) as directory:
