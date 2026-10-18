@@ -1,5 +1,7 @@
 # FBM Advisory Dashboard
 
+Etape 6.1a forbedrer projektoversigt, formularnulstilling, aktive valg, kvitteringer og navigation tilbage fra forløb. Se [ændringer, tests og prøvevejledning](ETAPE_6_1A_IMPLEMENTERING.md). Ingen ny migration; drift er fortsat ikke frigivet.
+
 Etape 6.1 tilføjer en valgfri projektkerne under Forretning → Projekter. Se [implementering, migration og prøvevejledning](ETAPE_6_1_IMPLEMENTERING.md). Eksisterende enkeltkundeopgaver kræver fortsat intet projekt. Økonomimodel og funktioner fra 6.2–6.6 er ikke implementeret; drift er ikke frigivet.
 
 Seneste begrænsede forbedring: [Etape 5.2](ETAPE_5_2_IMPLEMENTERING.md), afslutning med resultat og dato, valgfrie opfølgningskoblinger og diskrete statusfiltre. [Plan for ren drift og de første kunder](ETAPE_5_2_DRIFTSPLAN.md) er alene analyse. En kørende udviklingssession skal genstartes via `Start Monitor Development.bat` før migration 7; automatisk genindlæsning er spærret. Drift er ikke frigivet.

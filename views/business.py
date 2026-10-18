@@ -12,7 +12,7 @@ from services.business_service import (save_business_record, next_proposal_versi
     create_engagement_from_proposal, record_amendment, set_track_meetings,
     set_track_followups, set_deliverable_followups, accept_amendment, document_legacy_acceptance)
 from services.activity_service import dashboard_data, ACTIVE_ENGAGEMENTS
-from ui.navigation import open_business, open_activity, open_company_section
+from ui.navigation import open_business, open_activity, open_company_section, open_project
 from services.business_values import (clean, number_text, parse_danish_number,
                                       fee_text, parse_date, date_text, iso_date, timestamp_text)
 
@@ -452,6 +452,16 @@ def render():
         from views.projects import render as render_projects
         render_projects()
         return
+    context=st.session_state.get('business_project_return')
+    if context:
+        origin=q('SELECT p.id,p.title FROM projects p JOIN project_tracks t ON t.project_id=p.id WHERE p.id=? AND t.track_id=?',
+                 (context['project_id'],context['track_id']))
+        if len(origin):
+            if st.button('Tilbage til projekt: '+origin.iloc[0]['title'],key='business_return_project',icon=':material/arrow_back:'):
+                open_project(int(origin.iloc[0]['id']))
+                st.rerun()
+        else:
+            st.session_state.pop('business_project_return',None)
     companies = q('SELECT id, name FROM companies ORDER BY name')
     tracks = q('''SELECT t.*, c.name AS company FROM commercial_tracks t
         JOIN companies c ON c.id=t.company_id ORDER BY t.created_at DESC, t.id DESC''')

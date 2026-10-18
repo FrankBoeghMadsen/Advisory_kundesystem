@@ -20,6 +20,8 @@ def render_navigation():
                 st.session_state.pop('record_focus',None)
                 st.session_state.pop('business_listing',None)
                 st.session_state.pop('business_focus',None)
+                st.session_state.pop('business_project_return',None)
+                st.session_state.pop('project_panel',None)
                 set_page(pages[0])
                 st.rerun()
     pages = next(pages for groups in NAV_GROUPS.values() for pages in groups.values() if page in pages)
@@ -31,12 +33,24 @@ def render_navigation():
             st.rerun()
 
 
-def open_business(track_id, section='Pipeline', record_id=None, kind=None):
+def open_business(track_id, section='Pipeline', record_id=None, kind=None, source_project=None):
+    if source_project is None:
+        st.session_state.pop('business_project_return',None)
+    else:
+        st.session_state['business_project_return']=dict(project_id=int(source_project),track_id=int(track_id))
     st.session_state['business_requested_view'] = 'Forløb'
     st.session_state['business_track_id'] = int(track_id)
     st.session_state['business_requested_section'] = section
     st.session_state['business_focus'] = dict(kind=kind, id=record_id,track_id=int(track_id))
     st.session_state.pop('business_listing',None)
+    set_page('Forretning')
+
+
+def open_project(project_id):
+    st.session_state['business_requested_view']='Projekter'
+    st.session_state['project_requested_selection']=int(project_id)
+    for key in ('business_listing','business_focus','business_track_id','business_project_return','project_panel'):
+        st.session_state.pop(key,None)
     set_page('Forretning')
 
 

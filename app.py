@@ -26,8 +26,8 @@ h1 { font-size: 2rem !important; letter-spacing: 0 !important; }
 h2, h3 { letter-spacing: 0 !important; }
 [data-testid="stRadio"] label:has(input:checked) { background: #d3ebe4; border-bottom: 3px solid #24776b; font-weight: 700; }
 .st-key-business_navigation label:has(input[type="radio"]) { padding: 8px 12px; border: 1px solid #aab6b2; border-radius: 4px; }
-.st-key-business_status_filters [data-baseweb="tag"] { background-color: #e9efec; color: #243b35; border: 1px solid #b6c7c0; }
-.st-key-business_status_filters [data-baseweb="tag"] svg { color: #243b35; }
+.st-key-business_status_filters [data-baseweb="tag"], .st-key-project_module [data-baseweb="tag"] { background-color: #e9efec; color: #243b35; border: 1px solid #b6c7c0; }
+.st-key-business_status_filters [data-baseweb="tag"] svg, .st-key-project_module [data-baseweb="tag"] svg { color: #243b35; }
 </style>
 """, unsafe_allow_html=True)
 
