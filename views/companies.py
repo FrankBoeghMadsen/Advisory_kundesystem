@@ -25,7 +25,7 @@ from app_context import (
 
 
 from ui.activity_editor import meeting_editor, deletion_controls
-from services.business_values import parse_date, iso_date
+from services.business_values import parse_date, iso_date, timestamp_text
 
 
 def render():
@@ -267,6 +267,10 @@ def render():
                                 st.write(f"**Næste handling:** {f['next_action']}")
                             if f["description"]:
                                 st.write(f["description"])
+                            if f['completed_at']:
+                                st.caption('Senest afsluttet: '+timestamp_text(f['completed_at']))
+                            if f['completion_result']:
+                                st.write('Resultat: '+f['completion_result'])
                             with st.expander("Redigér / slet opfølgning"):
                                 with st.form(f"edit_followup_{int(f['id'])}", enter_to_submit=False):
                                     title = st.text_input("Titel", f["title"])
@@ -278,14 +282,15 @@ def render():
                                     due_date = iso_date(due_value) if due_value else (f['due_date'] if not parse_date(f['due_date']) else '')
                                     priority = st.selectbox("Prioritet", ["Lav", "Middel", "Høj"], index=severity_index(f["priority"], ["Lav", "Middel", "Høj"]))
                                     status = st.selectbox("Status", ["Ny", "Planlagt", "I gang", "Afventer", "Lukket", "Arkiveret"], index=severity_index(f["status"], ["Ny", "Planlagt", "I gang", "Afventer", "Lukket", "Arkiveret"]))
+                                    completion_result = st.text_area('Resultat / afslutningsnote', f['completion_result'] or '')
                                     a, b = st.columns(2)
                                     if a.form_submit_button("Gem ændringer"):
                                         if not title.strip():
                                             st.error('Angiv en beskrivende titel.')
                                             return
                                         run(
-                                            "UPDATE followups SET title=?, followup_type=?, description=?, next_action=?, person=?, due_date=?, priority=?, status=?, updated_at=? WHERE id=?",
-                                            (title, followup_type, description, next_action, person, due_date, priority, status, now_iso(), int(f["id"])),
+                                            "UPDATE followups SET title=?, followup_type=?, description=?, next_action=?, person=?, due_date=?, priority=?, status=?, updated_at=?,completion_result=? WHERE id=?",
+                                            (title, followup_type, description, next_action, person, due_date, priority, status, now_iso(), completion_result,int(f["id"])),
                                         )
                                         st.rerun()
                                 deletion_controls('followups',int(f['id']))

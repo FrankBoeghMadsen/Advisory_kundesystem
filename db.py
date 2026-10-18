@@ -591,6 +591,20 @@ def migration_006_agreement_acceptance(conn):
             (json.dumps(dict(row),ensure_ascii=False),row['id']))
 
 
+def migration_007_followup_completion(conn):
+    add_column_if_missing(conn, 'followups', 'completed_at', "TEXT DEFAULT ''")
+    add_column_if_missing(conn, 'followups', 'completion_result', "TEXT DEFAULT ''")
+    # Do not invent completion dates for already closed historical records.
+    conn.execute('''CREATE TRIGGER followups_completed_update AFTER UPDATE OF status ON followups
+        WHEN NEW.status='Lukket' AND COALESCE(OLD.status,'Ny')<>'Lukket'
+        BEGIN UPDATE followups SET completed_at=strftime('%Y-%m-%dT%H:%M:%f','now')
+        WHERE id=NEW.id; END''')
+    conn.execute('''CREATE TRIGGER followups_completed_insert AFTER INSERT ON followups
+        WHEN NEW.status='Lukket' AND COALESCE(NEW.completed_at,'')=''
+        BEGIN UPDATE followups SET completed_at=strftime('%Y-%m-%dT%H:%M:%f','now')
+        WHERE id=NEW.id; END''')
+
+
 MIGRATIONS = (
     (1, "core_schema", migration_001_core_schema),
     (2, "briefings", migration_002_briefings),
@@ -598,6 +612,7 @@ MIGRATIONS = (
     (4, "business_module", migration_004_business_module),
     (5, "agreement_details", migration_005_agreement_details),
     (6, "agreement_acceptance", migration_006_agreement_acceptance),
+    (7, "followup_completion", migration_007_followup_completion),
 )
 
 
@@ -645,6 +660,9 @@ def migrate_db(conn):
 
 def init_db():
     validate_data_configuration(APP_MODE, DATA_DIR, PRODUCTION_DATA_DIR)
+    if APP_MODE == 'development' and any(m[0] == 7 for m in pending_migrations(DB_PATH)) and os.environ.get('FRANK_MONITOR_STAGE52_MIGRATION') != '1':
+        from runtime_config import RuntimeConfigurationError
+        raise RuntimeConfigurationError('Etape 5.2 kræver genstart med Start Monitor Development.bat. Automatisk genindlæsning må ikke migrere databasen.')
     if APP_MODE == "production" and any(m[0] >= 5 for m in pending_migrations(DB_PATH)):
         from runtime_config import RuntimeConfigurationError
         raise RuntimeConfigurationError(

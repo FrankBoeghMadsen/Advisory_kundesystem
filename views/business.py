@@ -83,9 +83,24 @@ def _followups(track_id, prefix):
         owner = 'Afventer' if item['status'] == 'Afventer' else 'Næste handling'
         st.write(f"**{owner}:** {item['next_action'] or item['title']}")
         st.caption(f"{date_text(item['due_date'])} · {item['person'] or 'Ingen person angivet'} · {item['status']}")
+        if st.button('Redigér opfølgning', key=f"{prefix}_open_{item['id']}"):
+            open_activity(dict(kind='Opfølgning',id=int(item['id'])))
+            st.rerun()
     if st.button('Åbn opfølgninger', key=prefix+'_followups'):
         st.session_state['page'] = 'Opgaver'
         st.rerun()
+    with st.expander('Afsluttede opfølgninger'):
+        closed = q("SELECT * FROM followups WHERE commercial_track_id=? AND status IN ('Lukket','Arkiveret') ORDER BY completed_at DESC,id DESC", (track_id,))
+        if not len(closed):
+            st.caption('Ingen afsluttede opfølgninger tilknyttet.')
+        for _, item in closed.iterrows():
+            st.write('**'+item['title']+'**')
+            st.caption(item['status']+' · '+(timestamp_text(item['completed_at']) if item['completed_at'] else 'Afslutningsdato ikke registreret'))
+            if item['completion_result']:
+                st.write(item['completion_result'])
+            if st.button('Åbn', key=f"{prefix}_closed_{item['id']}"):
+                open_activity(dict(kind='Opfølgning', id=int(item['id'])))
+                st.rerun()
 
 
 def _track_editor(row, companies):
@@ -452,8 +467,9 @@ def render():
     actor = _select('Kunde / aktør', actor_options, 'Alle', 'business_actor_filter')
     if 'business_status_filter' not in st.session_state:
         st.session_state['business_status_filter']=TRACK_STATUSES
-    statuses = st.multiselect('Status på forløb', TRACK_STATUSES,
-        default=None, key='business_status_filter')
+    with st.container(key='business_status_filters'):
+        statuses = st.multiselect('Status på forløb', TRACK_STATUSES,
+            default=None, key='business_status_filter')
     search = st.text_input('Søg efter forløb', key='business_search')
     shown = tracks[tracks['status'].isin(statuses)]
     if actor != 'Alle':

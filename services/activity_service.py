@@ -66,7 +66,7 @@ def build_dashboard(today, tracks, engagements, deliveries, proposals, meetings,
     for row in open_tracks:
         add('Forventet beslutning',row,'expected_decision_date',False)
     activities = sorted([e for e in events.values() if e['day'] <= today+timedelta(days=30)],
-                        key=lambda e:(e['day'], e.get('meeting_time') or '', e['kind'], int(e['id'])))
+                        key=lambda e:(e['day'], {'Høj':0,'Middel':1,'Lav':2}.get(e.get('priority'),1), e.get('meeting_time') or '', e['kind'], int(e['id'])))
     return dict(groups=groups, activities=activities,
         overdue=sum(e['overdue'] for e in activities),
         next30=sum(not e['overdue'] for e in activities), undated=undated,

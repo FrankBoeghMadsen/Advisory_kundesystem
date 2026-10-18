@@ -171,12 +171,12 @@ def company_timeline(company_id):
     )
     add_timeline_rows(
         items,
-        q("""SELECT created_at, due_date, title, followup_type, description, next_action, person, priority, status, source_type
+        q("""SELECT created_at, due_date, title, followup_type, description, next_action, person, priority, status, source_type,completion_result
              FROM followups WHERE company_id=?""", (company_id,)),
         "Opfølgning",
         "due_date",
         "title",
-        ["next_action", "description"],
+        ["next_action", "description", "completion_result"],
         ["followup_type", "person", "priority", "status", "source_type"],
     )
     return sorted(items, key=lambda item: item["sort_date"] or "", reverse=True)
