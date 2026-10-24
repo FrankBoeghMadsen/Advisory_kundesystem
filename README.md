@@ -1,5 +1,7 @@
 # FBM Advisory Dashboard
 
+Seneste godkendte brugerforbedring: [leveranceformular, acceptdokumentation og enkel ugeplan](BRUGERFORBEDRINGER_UGEPLAN.md). Kræver migration 9 på den isolerede udviklingsdatabase og genstart via `Start Monitor Development.bat`, med backup før migration. Ingen driftsoverførsel eller Outlook-integration.
+
 Etape 6.1b samler projektknapper ved overskrifterne, forbedrer formularhandlinger og retur-navigation og gør tilknytningsvejledning situationsbestemt. Se [ændringer, testresultater, begrænsninger og prøvevejledning](ETAPE_6_1B_IMPLEMENTERING.md). Ingen migration eller driftsoverførsel.
 
 Etape 6.1a forbedrer projektoversigt, formularnulstilling, aktive valg, kvitteringer og navigation tilbage fra forløb. Se [ændringer, tests og prøvevejledning](ETAPE_6_1A_IMPLEMENTERING.md). Ingen ny migration; drift er fortsat ikke frigivet.

@@ -673,6 +673,52 @@ def migration_008_project_core(conn):
     conn.execute('CREATE INDEX idx_project_workstreams_project ON project_workstreams(project_id)')
 
 
+def migration_009_planning_acceptance(conn):
+    conn.execute('''CREATE TABLE proposal_acceptances (
+        id INTEGER PRIMARY KEY, proposal_id INTEGER NOT NULL REFERENCES proposals(id),
+        acceptance_date TEXT NOT NULL DEFAULT '', acceptance_method TEXT NOT NULL DEFAULT '',
+        document_reference TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', recorded_at TEXT NOT NULL)''')
+    conn.execute('''CREATE TABLE work_blocks (
+        id INTEGER PRIMARY KEY, work_date TEXT NOT NULL,
+        engagement_id INTEGER NOT NULL REFERENCES engagements(id),
+        deliverable_id INTEGER REFERENCES deliverables(id),
+        description TEXT NOT NULL CHECK(length(trim(description))>0),
+        planned_minutes INTEGER NOT NULL CHECK(planned_minutes>0), note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''')
+    conn.execute('''CREATE TABLE daily_capacity (
+        work_date TEXT PRIMARY KEY, capacity_minutes INTEGER NOT NULL CHECK(capacity_minutes>=0))''')
+    conn.execute('CREATE INDEX idx_work_blocks_date ON work_blocks(work_date)')
+    # Targeted guards do not change legacy connections or global FK behaviour.
+    for operation in ('INSERT','UPDATE'):
+        conn.execute(f'''CREATE TRIGGER work_blocks_guard_{operation.lower()} BEFORE {operation} ON work_blocks
+            WHEN NOT EXISTS(SELECT 1 FROM engagements WHERE id=NEW.engagement_id)
+            OR (NEW.deliverable_id IS NOT NULL AND NOT EXISTS(
+                SELECT 1 FROM deliverables WHERE id=NEW.deliverable_id AND engagement_id=NEW.engagement_id))
+            BEGIN SELECT RAISE(ABORT,'Ugyldig planlægningsrelation'); END''')
+    for table,column in (('engagements','engagement_id'),('deliverables','deliverable_id')):
+        conn.execute(f'''CREATE TRIGGER protect_planned_{table} BEFORE DELETE ON {table}
+            WHEN EXISTS(SELECT 1 FROM work_blocks WHERE {column}=OLD.id)
+            BEGIN SELECT RAISE(ABORT,'Posten har arbejdsblokke'); END''')
+        conn.execute(f'''CREATE TRIGGER protect_planned_key_{table} BEFORE UPDATE OF id ON {table}
+            WHEN NEW.id<>OLD.id AND EXISTS(SELECT 1 FROM work_blocks WHERE {column}=OLD.id)
+            BEGIN SELECT RAISE(ABORT,'Posten har arbejdsblokke'); END''')
+    conn.execute('''CREATE TRIGGER protect_planned_delivery_parent BEFORE UPDATE OF engagement_id ON deliverables
+        WHEN NEW.engagement_id<>OLD.engagement_id AND EXISTS(SELECT 1 FROM work_blocks WHERE deliverable_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Leverancen har arbejdsblokke'); END''')
+    conn.execute('''CREATE TRIGGER acceptance_guard BEFORE INSERT ON proposal_acceptances
+        WHEN NOT EXISTS(SELECT 1 FROM proposals WHERE id=NEW.proposal_id AND status='Accepteret')
+        BEGIN SELECT RAISE(ABORT,'Tilbuddet er ikke accepteret'); END''')
+    for operation in ('UPDATE','DELETE'):
+        conn.execute(f'''CREATE TRIGGER acceptance_history_{operation.lower()} BEFORE {operation} ON proposal_acceptances
+            BEGIN SELECT RAISE(ABORT,'Acceptdokumentation bevares som historik'); END''')
+    conn.execute('''CREATE TRIGGER protect_documented_proposal BEFORE DELETE ON proposals
+        WHEN EXISTS(SELECT 1 FROM proposal_acceptances WHERE proposal_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Tilbuddet har acceptdokumentation'); END''')
+    conn.execute('''CREATE TRIGGER protect_documented_proposal_key BEFORE UPDATE OF id ON proposals
+        WHEN NEW.id<>OLD.id AND EXISTS(SELECT 1 FROM proposal_acceptances WHERE proposal_id=OLD.id)
+        BEGIN SELECT RAISE(ABORT,'Tilbuddet har acceptdokumentation'); END''')
+
+
 MIGRATIONS = (
     (1, "core_schema", migration_001_core_schema),
     (2, "briefings", migration_002_briefings),
@@ -682,6 +728,7 @@ MIGRATIONS = (
     (6, "agreement_acceptance", migration_006_agreement_acceptance),
     (7, "followup_completion", migration_007_followup_completion),
     (8, "project_core", migration_008_project_core),
+    (9, "planning_acceptance", migration_009_planning_acceptance),
 )
 
 
@@ -740,6 +787,9 @@ def init_db():
         raise RuntimeConfigurationError(
             "Udviklingsversionen afventer godkendelse til drift. Brug udviklingsstarten eller den tidligere driftversion."
         )
+    if APP_MODE == 'development' and any(m[0] == 9 for m in pending_migrations(DB_PATH)) and os.environ.get('FRANK_MONITOR_PLANNING_MIGRATION') != '1':
+        from runtime_config import RuntimeConfigurationError
+        raise RuntimeConfigurationError('Ugeplanlægning kræver genstart med Start Monitor Development.bat. Automatisk genindlæsning må ikke migrere databasen.')
     ensure_data_dir()
     existing_database = DB_PATH.exists()
     migrations = pending_migrations(DB_PATH)

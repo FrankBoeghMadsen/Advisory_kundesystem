@@ -7,6 +7,16 @@ from services.business_values import clean, parse_date
 ACTIVE_ENGAGEMENTS = ('Planlagt', 'I gang', 'Afventer')
 
 
+def activity_urgency(item, today):
+    if not item['binding']:
+        return ('Forventet dato passeret' if item['day']<today else 'Forventet dato','neutral')
+    if item['day']<today:
+        return ('Overskredet frist','red')
+    if item['kind'] in ('Leverancefrist','Tilbudsfrist','Opfølgning') and item['day']<=today+timedelta(days=3):
+        return ('Frist snart','orange')
+    return ('','neutral')
+
+
 def dashboard_data(today=None):
     today = today or datetime.now(ZoneInfo('Europe/Copenhagen')).date()
     tracks = q('''SELECT t.*, c.name AS company FROM commercial_tracks t

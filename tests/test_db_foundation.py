@@ -38,7 +38,7 @@ class DatabaseFoundationTests(unittest.TestCase):
         with isolated_database() as data_dir:
             db.init_db()
 
-            self.assertEqual(db.applied_migration_versions(db.DB_PATH), {1, 2, 3, 4, 5, 6, 7, 8})
+            self.assertEqual(db.applied_migration_versions(db.DB_PATH), {1, 2, 3, 4, 5, 6, 7, 8, 9})
             result = db.verify_database(db.DB_PATH)
             self.assertEqual(result["integrity"], "ok")
             self.assertEqual(result["foreign_key_violations"], 0)
@@ -85,7 +85,7 @@ class DatabaseFoundationTests(unittest.TestCase):
                     ("Bevaret aktør",),
                 ).fetchone()
                 self.assertEqual(tuple(row), ("Bevaret aktør", "Life science-virksomhed", "Aktiv"))
-            self.assertEqual(db.applied_migration_versions(db.DB_PATH), {1, 2, 3, 4, 5, 6, 7, 8})
+            self.assertEqual(db.applied_migration_versions(db.DB_PATH), {1, 2, 3, 4, 5, 6, 7, 8, 9})
 
     def test_backup_can_be_restored_and_verified_without_touching_source(self):
         with isolated_database():

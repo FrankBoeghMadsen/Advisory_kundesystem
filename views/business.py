@@ -12,6 +12,7 @@ from services.business_service import (save_business_record, next_proposal_versi
     create_engagement_from_proposal, record_amendment, set_track_meetings,
     set_track_followups, set_deliverable_followups, accept_amendment, document_legacy_acceptance)
 from services.activity_service import dashboard_data, ACTIVE_ENGAGEMENTS
+from services.acceptance_service import ACCEPTANCE_METHODS, document_acceptance
 from ui.navigation import open_business, open_activity, open_company_section, open_project
 from services.business_values import (clean, number_text, parse_danish_number,
                                       fee_text, parse_date, date_text, iso_date, timestamp_text)
@@ -184,6 +185,24 @@ def _proposal_editor(row, track_id, correction=False):
             st.error(str(exc))
 
 
+def _acceptance_fields(prefix, values=None):
+    values=values or {}
+    day=_date('Acceptdato',values.get('acceptance_date'),prefix+'_accept_date')
+    method=st.selectbox('Acceptform',ACCEPTANCE_METHODS,
+        index=ACCEPTANCE_METHODS.index(values['acceptance_method']) if values.get('acceptance_method') in ACCEPTANCE_METHODS else 0,
+        key=prefix+'_accept_method')
+    reference=st.text_input('Reference til acceptdokument',values.get('document_reference',''),key=prefix+'_accept_doc')
+    note=st.text_area('Kort acceptnote',values.get('note',''),key=prefix+'_accept_note',height=80)
+    return dict(acceptance_date=iso_date(day),acceptance_method=method,document_reference=reference,note=note)
+
+
+def _show_acceptance(data):
+    st.caption(f"Accept: {date_text(data.get('acceptance_date'))} · {data.get('acceptance_method') or 'Acceptform ikke angivet'}")
+    st.write(data.get('document_reference') or 'Reference til acceptdokument ikke angivet.')
+    if data.get('note'):
+        st.write(data['note'])
+
+
 def _engagement_editor(row, track_id, proposal=None):
     prefix = f"engagement_{track_id}_{row.get('id', 'new')}_{proposal['id'] if proposal else 'direct'}"
     title = st.text_input('Opgavetitel', row.get('title') or '', key=prefix+'_title')
@@ -193,6 +212,10 @@ def _engagement_editor(row, track_id, proposal=None):
     end = _date('Forventet slutdato', row.get('target_end_date'), prefix+'_end')
     completed = _date('Faktisk afslutningsdato', row.get('completed_at'), prefix+'_completed')
     fees = _fees(prefix, row, agreed=True) if not row.get('id') else {}
+    acceptance=None
+    if proposal:
+        previous=q('SELECT * FROM proposal_acceptances WHERE proposal_id=? ORDER BY id DESC LIMIT 1',(int(proposal['id']),))
+        acceptance=_acceptance_fields(prefix,previous.iloc[0].to_dict() if len(previous) else None)
     if st.button('Accepter tilbud og opret kundeopgave' if proposal else 'Gem kundeopgave', key=prefix+'_save', type='primary'):
         try:
             parsed = _parsed_fees(fees)
@@ -201,7 +224,7 @@ def _engagement_editor(row, track_id, proposal=None):
             if proposal:
                 created_id = create_engagement_from_proposal(int(proposal['id']), title, description, status,
                     iso_date(start), iso_date(end), parsed['fee_model'], parsed['agreed_fee_ex_vat'],
-                    parsed['fee_note'], parsed.get('max_hours'), parsed.get('fee_cap_ex_vat'), parsed.get('included_hours'))
+                    parsed['fee_note'], parsed.get('max_hours'), parsed.get('fee_cap_ex_vat'), parsed.get('included_hours'),acceptance)
                 save_business_record('engagements', dict(title=title, completed_at=iso_date(completed)), created_id)
                 st.rerun()
             else:
@@ -246,6 +269,23 @@ def _proposals(track_id):
                 st.write(row['document_reference'] or 'Ingen dokumentreference.')
             if row['status'] == 'Accepteret':
                 st.caption('Accepteret aftalegrundlag · skrivebeskyttet')
+                documentation=q('SELECT * FROM proposal_acceptances WHERE proposal_id=? ORDER BY id DESC',(proposal_id,))
+                if documentation.empty:
+                    st.caption('Acceptdokumentation ikke registreret.')
+                else:
+                    _show_acceptance(documentation.iloc[0].to_dict())
+                with st.expander('Supplér acceptdokumentation'):
+                    with st.form(f'accept_document_{proposal_id}',enter_to_submit=False):
+                        data=_acceptance_fields(f'accept_document_{proposal_id}',documentation.iloc[0].to_dict() if len(documentation) else None)
+                        if st.form_submit_button('Gem acceptdokumentation'):
+                            try:
+                                document_acceptance(proposal_id,data)
+                                st.rerun()
+                            except ValueError as exc:
+                                st.error(str(exc))
+                    for _, previous in documentation.iloc[1:].iterrows():
+                        st.caption('Tidligere registrering · '+timestamp_text(previous['recorded_at']))
+                        _show_acceptance(previous.to_dict())
                 with st.expander('Korrigér registreringsfejl'):
                     if st.checkbox('Jeg vil korrigere en registreringsfejl', key=f'correct_{proposal_id}'):
                         _proposal_editor(row, track_id, correction=True)
@@ -277,6 +317,8 @@ def _proposals(track_id):
 
 def _deliverable_editor(row, engagement_id):
     prefix = f"deliverable_{engagement_id}_{row.get('id', 'new')}"
+    if not row.get('id'):
+        prefix+=f"_{st.session_state.get('deliverable_generation_'+str(engagement_id),0)}"
     title = st.text_input('Leverancetitel', row.get('title') or '', key=prefix+'_title')
     description = st.text_area('Beskrivelse', row.get('description') or '', key=prefix+'_desc')
     due = _date('Leverancedeadline', row.get('due_date'), prefix+'_due')
@@ -284,9 +326,16 @@ def _deliverable_editor(row, engagement_id):
     priority = _select('Prioritet', ['Lav','Middel','Høj'], row.get('priority','Middel'), prefix+'_priority')
     responsible = st.text_input('Ansvarlig / note', row.get('responsible_note') or '', key=prefix+'_responsible')
     if st.button('Gem leverance', key=prefix+'_save'):
-        _save('deliverables', dict(engagement_id=engagement_id, title=title, description=description,
-            due_date=iso_date(due), status=status, priority=priority, responsible_note=responsible,
-            completed_at=row.get('completed_at') or ''), row.get('id'))
+        try:
+            save_business_record('deliverables', dict(engagement_id=engagement_id, title=title, description=description,
+                due_date=iso_date(due), status=status, priority=priority, responsible_note=responsible,
+                completed_at=row.get('completed_at') or ''), row.get('id'))
+            if not row.get('id'):
+                key='deliverable_generation_'+str(engagement_id)
+                st.session_state[key]=st.session_state.get(key,0)+1
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
 
 
 def _engagements(track_id):
@@ -312,6 +361,9 @@ def _engagements(track_id):
                 _engagement_editor(row, track_id)
             with st.expander('Oprindelig aftale'):
                 original = json.loads(row['original_agreement'] or '{}')
+                if original.get('acceptance_documentation'):
+                    st.caption('Acceptoplysninger registreret ved oprettelse')
+                    _show_acceptance(original['acceptance_documentation'])
                 st.write(original.get('title') or row['title'])
                 st.write(original.get('description') or '')
                 st.write(fee_text(original.get('agreed_fee_ex_vat'), original.get('fee_model','Fast pris')))
@@ -325,11 +377,19 @@ def _engagements(track_id):
                     st.caption(f"Grundlag: tilbud #{int(row['accepted_proposal_id'])}")
                 if row['accepted_proposal_snapshot']:
                     accepted=json.loads(row['accepted_proposal_snapshot'])
+                    if accepted.get('acceptance_documentation') and not original.get('acceptance_documentation'):
+                        _show_acceptance(accepted['acceptance_documentation'])
                     st.markdown('**Tilbud ved accept**')
                     st.write(accepted.get('scope') or accepted.get('title',''))
                     st.write(fee_text(accepted.get('offered_fee_ex_vat'),accepted.get('fee_model','Fast pris')))
                 else:
                     st.caption('Tilbudsversion ved accept er ikke særskilt registreret historisk.')
+                if clean(row['accepted_proposal_id']) is not None:
+                    latest=q('SELECT * FROM proposal_acceptances WHERE proposal_id=? ORDER BY id DESC LIMIT 1',
+                             (int(row['accepted_proposal_id']),))
+                    if not latest.empty:
+                        st.markdown('**Senest registrerede acceptdokumentation**')
+                        _show_acceptance(latest.iloc[0].to_dict())
             with st.expander('Aftaleændringer'):
                 for _, amendment in q('SELECT * FROM engagement_amendments WHERE engagement_id=? ORDER BY id DESC', (eid,)).iterrows():
                     st.write(f"**{date_text(amendment['amendment_date'])}** · {amendment['description']}")
@@ -390,6 +450,7 @@ def _engagements(track_id):
                     except ValueError as exc:
                         st.error(str(exc))
             st.markdown('**Leverancer**')
+            st.caption('Særskilte arbejdsdele under den samlede kundeopgave')
             for _, delivery_series in q('SELECT * FROM deliverables WHERE engagement_id=? ORDER BY due_date, id', (eid,)).iterrows():
                 delivery = delivery_series.to_dict()
                 if focus.get('kind')=='deliverable' and int(delivery['id'])!=focus.get('id'):

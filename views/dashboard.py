@@ -1,33 +1,40 @@
 import streamlit as st
 
-from services.activity_service import dashboard_data
+from services.activity_service import dashboard_data, activity_urgency
+from services.planning_service import local_today, danish_date
 from services.business_values import date_text, clean
 from ui.navigation import open_activity, open_business, set_page
 
 
 def render():
-    data = dashboard_data()
+    today=local_today()
+    st.subheader(danish_date(today))
+    mode=st.radio('Dashboardvisning',['Overblik','Ugeplan'],horizontal=True,key='dashboard_view')
+    if mode=='Ugeplan':
+        from views.planning import render as render_planning
+        render_planning()
+        return
+    data = dashboard_data(today)
     st.subheader('Aktiviteter og deadlines')
     st.caption(f"{data['overdue']} passerede datoer · {data['next30']} aktiviteter i dag og de næste 30 dage")
     if not data['activities']:
         st.caption('Ingen daterede aktiviteter kræver opmærksomhed i perioden.')
     for item in data['activities']:
-        with st.container(border=True):
+        with st.container(key=f"dashboard_activity_{item['kind']}_{item['id']}"):
             label = date_text(item['day'])
-            if item['overdue']:
-                if item['binding']:
-                    st.error(f"Forfalden · {label}")
-                else:
-                    st.caption(f"Forventet dato passeret · {label} · ikke en bindende frist")
-            else:
-                st.caption(label + (f" kl. {item['meeting_time']}" if item.get('meeting_time') else ''))
-            a,b = st.columns([5,1])
+            dates,a,b = st.columns([2,6,1])
+            state,tone=activity_urgency(item,today)
+            dates.markdown(f':{tone}[**{label}**]' if tone!='neutral' else f'**{label}**')
+            if state:
+                dates.caption(state)
+            if item.get('meeting_time'):
+                dates.caption('Kl. '+item['meeting_time'])
             a.markdown(f"**{item.get('company') or 'Ingen aktør'} · {item['title']}**")
             meta = f"{item['kind']} · {item.get('status') or 'Planlagt'}"
             if not item['binding']:
                 meta += ' · forventning, ikke bindende deadline'
             if item.get('priority'):
-                meta += f" · {item['priority']} prioritet"
+                meta += f" · {'**Høj prioritet**' if item['priority']=='Høj' else item['priority']+' prioritet'}"
             a.caption(meta)
             if item['related_followups']:
                 a.caption(f"{len(item['related_followups'])} tilknyttet opfølgning på samme frist")

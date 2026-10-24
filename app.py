@@ -31,6 +31,11 @@ h2, h3 { letter-spacing: 0 !important; }
 .st-key-project_module [data-testid="stVerticalBlock"] { gap: 0.65rem; }
 .st-key-project_module h4 { margin-top: 0.8rem; }
 .st-key-project_form_actions { max-width: 26rem; }
+[class*="st-key-dashboard_activity_"] { border-bottom: 1px solid #E5E7EB; padding-bottom: 0.25rem; }
+[class*="st-key-dashboard_activity_"] [data-testid="stVerticalBlock"] { gap: 0.15rem; }
+.st-key-week_calendar [data-testid="stHorizontalBlock"] { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 0.9rem; }
+.st-key-week_calendar [data-testid="stColumn"] { width: auto; min-width: 0; }
+.st-key-week_calendar [data-testid="stVerticalBlock"] { gap: 0.4rem; }
 @media (max-width: 768px) {
     .st-key-project_form_actions [data-testid="stHorizontalBlock"] { flex-wrap: nowrap; }
     .st-key-project_form_actions [data-testid="stColumn"] { min-width: 0; width: auto; flex: 1 1 auto; }

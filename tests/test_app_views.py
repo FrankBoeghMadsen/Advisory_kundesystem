@@ -121,6 +121,8 @@ conn=connect()
 conn.execute("UPDATE deliverables SET title='Juridisk vurderingsnotat om medicinsk cannabis', due_date='2026-10-24',priority='Høj'")
 actor=conn.execute('SELECT company_id FROM commercial_tracks WHERE id=?',(track,)).fetchone()[0]
 meeting=conn.execute("INSERT INTO meetings(company_id,title,meeting_date,raw_text,created_at) VALUES(?,'TEST Kundemøde','2026-10-24','TEST Referat',?)",(actor,utc_now_iso())).lastrowid
+from services.planning_service import local_today
+conn.execute('UPDATE meetings SET meeting_date=? WHERE id=?',(local_today().isoformat(),meeting))
 followup=conn.execute("INSERT INTO followups(company_id,title,due_date,priority,status,created_at) VALUES(?,'TEST Lav prioritet','2026-10-24','Lav','Ny',?)",(actor,utc_now_iso())).lastrowid
 conn.commit()
 app=AppTest.from_file('app.py').run(timeout=30)

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import json
 
 from db import connect, utc_now_iso
+from services.acceptance_service import acceptance_values, insert_acceptance
 
 
 def next_proposal_version(track_id):
@@ -27,9 +28,11 @@ def create_engagement_from_proposal(
     max_hours=None,
     fee_cap_ex_vat=None,
     included_hours=None,
+    acceptance=None,
 ):
     """Create an engagement only after the user submits the explicit conversion form."""
     now = utc_now_iso()
+    acceptance=acceptance_values(acceptance)
     with closing(connect()) as conn:
         proposal = conn.execute(
             """SELECT p.*, t.company_id
@@ -79,12 +82,14 @@ def create_engagement_from_proposal(
                    WHERE id=?""",
                 (max_hours, fee_cap_ex_vat, included_hours, cursor.lastrowid),
             )
+            documentation=insert_acceptance(conn,proposal_id,acceptance)
             snapshot = dict(conn.execute("SELECT * FROM engagements WHERE id=?", (cursor.lastrowid,)).fetchone())
+            snapshot['acceptance_documentation']=documentation
             snapshot.pop('original_agreement', None)
             conn.execute("UPDATE engagements SET original_agreement=? WHERE id=?",
                          (json.dumps(snapshot, ensure_ascii=False), cursor.lastrowid))
             conn.execute('UPDATE engagements SET accepted_proposal_snapshot=? WHERE id=?',
-                         (json.dumps(dict(proposal,status='Accepteret'),ensure_ascii=False),cursor.lastrowid))
+                         (json.dumps(dict(proposal,status='Accepteret',acceptance_documentation=documentation),ensure_ascii=False),cursor.lastrowid))
             conn.commit()
             return int(cursor.lastrowid)
         except Exception:
